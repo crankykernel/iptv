@@ -6,6 +6,8 @@ use crate::player::Player;
 use crate::xtream_api::{Category, XTreamAPI};
 use anyhow::Result;
 use inquire::Select;
+use tracing::{info, warn};
+use chrono::{DateTime, Utc};
 
 pub struct MenuSystem {
     providers: Vec<ProviderConfig>,
@@ -185,7 +187,7 @@ impl MenuSystem {
     }
 
     async fn connect_to_provider(&mut self, provider: &ProviderConfig) -> Result<()> {
-        println!(
+        info!(
             "Connecting to provider: {}",
             provider.name.as_ref().unwrap_or(&provider.url)
         );
@@ -202,12 +204,20 @@ impl MenuSystem {
         match api.get_user_info().await {
             Ok(user_info) => {
                 if user_info.auth == 1 {
-                    println!("Connected as: {}", user_info.username);
-                    println!("Expires: {}", user_info.exp_date);
+                    // Parse expiration timestamp and format as human-readable date
+                    let expires_msg = if let Ok(exp_timestamp) = user_info.exp_date.parse::<i64>() {
+                        let exp_date = DateTime::from_timestamp(exp_timestamp, 0)
+                            .unwrap_or_else(Utc::now);
+                        format!("Expires: {}", exp_date.format("%Y-%m-%d %H:%M:%S UTC"))
+                    } else {
+                        format!("Expires: {}", user_info.exp_date)
+                    };
+                    
+                    info!("Connected! {}", expires_msg);
 
                     // Warm the cache on first connection
                     if let Err(e) = api.warm_cache().await {
-                        eprintln!("Warning: Failed to warm cache: {}", e);
+                        warn!("Failed to warm cache: {}", e);
                     }
 
                     self.current_api = Some(api);

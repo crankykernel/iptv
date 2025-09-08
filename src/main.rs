@@ -4,6 +4,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
+use tracing_subscriber::EnvFilter;
 
 use iptv::{Config, MenuSystem, Player};
 
@@ -15,11 +16,29 @@ struct Cli {
     /// Configuration file path
     #[arg(short, long, value_name = "FILE")]
     config: Option<PathBuf>,
+
+    /// Enable verbose (debug) logging
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Initialize tracing
+    let filter = if cli.verbose {
+        EnvFilter::new("debug")
+    } else {
+        EnvFilter::new("info")
+    };
+    
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .with_level(false)
+        .without_time()
+        .init();
 
     // Determine config file path
     let config_path = cli.config.unwrap_or_else(|| {

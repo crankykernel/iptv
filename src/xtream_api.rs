@@ -8,6 +8,7 @@ use reqwest::Client;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::time::Duration;
+use tracing::{debug, warn};
 
 fn deserialize_string_or_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
 where
@@ -665,7 +666,7 @@ impl XTreamAPI {
     }
 
     pub async fn warm_cache(&mut self) -> Result<()> {
-        println!("Warming cache for provider...");
+        debug!("Warming cache for provider...");
 
         // Warm categories first
         let mut tasks = Vec::new();
@@ -727,7 +728,7 @@ impl XTreamAPI {
         let mut warmed_count = 0;
         let content_types = ["live", "vod", "series"];
 
-        println!(
+        debug!(
             "Warming 'All' streams for {} content types...",
             content_types.len()
         );
@@ -781,18 +782,18 @@ impl XTreamAPI {
             match result {
                 Ok(()) => {
                     warmed_count += 1;
-                    println!("Warmed 'All' {} streams", content_type);
+                    debug!("Warmed 'All' {} streams", content_type);
                 }
                 Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to warm {} 'All' streams: {}",
+                    warn!(
+                        "Failed to warm {} 'All' streams: {}",
                         content_type, e
                     );
                 }
             }
         }
 
-        println!(
+        debug!(
             "Cache warming complete! Warmed {} 'All' content types.",
             warmed_count
         );
