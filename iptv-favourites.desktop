@@ -4,7 +4,7 @@
 [Desktop Entry]
 Name=IPTV Favourites
 Comment=Launch IPTV favourite streams via rofi menu
-Exec=%h/.cargo/bin/iptv rofi
+Exec=iptv rofi
 Icon=video-television
 Terminal=false
 Type=Application
