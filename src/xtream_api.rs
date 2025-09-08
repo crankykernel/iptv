@@ -5,9 +5,40 @@ use crate::cache::{CacheManager, CacheMetadata};
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::time::Duration;
+
+fn deserialize_string_or_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let value: Value = Deserialize::deserialize(deserializer)?;
+
+    match value {
+        Value::Array(arr) => {
+            let strings: Result<Vec<String>, _> = arr
+                .into_iter()
+                .map(|v| match v {
+                    Value::String(s) => Ok(s),
+                    _ => Err(D::Error::custom("Array contains non-string value")),
+                })
+                .collect();
+            Ok(Some(strings?))
+        }
+        Value::String(s) => {
+            if s.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(vec![s]))
+            }
+        }
+        Value::Null => Ok(None),
+        _ => Err(D::Error::custom("Expected string or array")),
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserInfoResponse {
@@ -90,24 +121,37 @@ pub struct Stream {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeriesInfo {
+    #[serde(default)]
     pub num: u32,
     pub name: String,
     pub series_id: u32,
+    #[serde(default)]
     pub cover: Option<String>,
+    #[serde(default)]
     pub plot: Option<String>,
+    #[serde(default)]
     pub cast: Option<String>,
+    #[serde(default)]
     pub director: Option<String>,
+    #[serde(default)]
     pub genre: Option<String>,
+    #[serde(rename = "releaseDate", default)]
     pub release_date: Option<String>,
+    #[serde(default)]
     pub last_modified: Option<String>,
+    #[serde(default)]
     pub rating: Option<String>,
+    #[serde(default)]
     pub rating_5based: Option<f32>,
+    #[serde(default, deserialize_with = "deserialize_string_or_vec")]
     pub backdrop_path: Option<Vec<String>>,
+    #[serde(default)]
     pub youtube_trailer: Option<String>,
+    #[serde(default)]
     pub episode_run_time: Option<String>,
+    #[serde(default)]
     pub category_id: String,
 }
-
 
 #[derive(Debug)]
 pub struct XTreamAPI {
@@ -266,7 +310,11 @@ impl XTreamAPI {
     }
 
     pub async fn get_user_info(&mut self) -> Result<UserInfo> {
-        if let Ok(Some(cached)) = self.cache_manager.get_cached::<UserInfo>(&self.provider_hash, "user_info", None).await {
+        if let Ok(Some(cached)) = self
+            .cache_manager
+            .get_cached::<UserInfo>(&self.provider_hash, "user_info", None)
+            .await
+        {
             if !cached.is_expired() {
                 return Ok(cached.data);
             }
@@ -274,14 +322,24 @@ impl XTreamAPI {
 
         let response: UserInfoResponse = self.make_request("get_user_info", None).await?;
         let user_info = response.user_info;
-        
+
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
             self.cache_ttl_seconds,
         );
-        
-        if let Err(e) = self.cache_manager.store_cache(&self.provider_hash, "user_info", None, user_info.clone(), metadata).await {
+
+        if let Err(e) = self
+            .cache_manager
+            .store_cache(
+                &self.provider_hash,
+                "user_info",
+                None,
+                user_info.clone(),
+                metadata,
+            )
+            .await
+        {
             eprintln!("Warning: Failed to cache user info: {}", e);
         }
 
@@ -289,21 +347,35 @@ impl XTreamAPI {
     }
 
     pub async fn get_live_categories(&mut self) -> Result<Vec<Category>> {
-        if let Ok(Some(cached)) = self.cache_manager.get_cached::<Vec<Category>>(&self.provider_hash, "live_categories", None).await {
+        if let Ok(Some(cached)) = self
+            .cache_manager
+            .get_cached::<Vec<Category>>(&self.provider_hash, "live_categories", None)
+            .await
+        {
             if !cached.is_expired() {
                 return Ok(cached.data);
             }
         }
 
         let categories: Vec<Category> = self.make_request("get_live_categories", None).await?;
-        
+
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
             self.cache_ttl_seconds,
         );
-        
-        if let Err(e) = self.cache_manager.store_cache(&self.provider_hash, "live_categories", None, categories.clone(), metadata).await {
+
+        if let Err(e) = self
+            .cache_manager
+            .store_cache(
+                &self.provider_hash,
+                "live_categories",
+                None,
+                categories.clone(),
+                metadata,
+            )
+            .await
+        {
             eprintln!("Warning: Failed to cache live categories: {}", e);
         }
 
@@ -311,21 +383,35 @@ impl XTreamAPI {
     }
 
     pub async fn get_vod_categories(&mut self) -> Result<Vec<Category>> {
-        if let Ok(Some(cached)) = self.cache_manager.get_cached::<Vec<Category>>(&self.provider_hash, "vod_categories", None).await {
+        if let Ok(Some(cached)) = self
+            .cache_manager
+            .get_cached::<Vec<Category>>(&self.provider_hash, "vod_categories", None)
+            .await
+        {
             if !cached.is_expired() {
                 return Ok(cached.data);
             }
         }
 
         let categories: Vec<Category> = self.make_request("get_vod_categories", None).await?;
-        
+
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
             self.cache_ttl_seconds,
         );
-        
-        if let Err(e) = self.cache_manager.store_cache(&self.provider_hash, "vod_categories", None, categories.clone(), metadata).await {
+
+        if let Err(e) = self
+            .cache_manager
+            .store_cache(
+                &self.provider_hash,
+                "vod_categories",
+                None,
+                categories.clone(),
+                metadata,
+            )
+            .await
+        {
             eprintln!("Warning: Failed to cache vod categories: {}", e);
         }
 
@@ -333,21 +419,35 @@ impl XTreamAPI {
     }
 
     pub async fn get_series_categories(&mut self) -> Result<Vec<Category>> {
-        if let Ok(Some(cached)) = self.cache_manager.get_cached::<Vec<Category>>(&self.provider_hash, "series_categories", None).await {
+        if let Ok(Some(cached)) = self
+            .cache_manager
+            .get_cached::<Vec<Category>>(&self.provider_hash, "series_categories", None)
+            .await
+        {
             if !cached.is_expired() {
                 return Ok(cached.data);
             }
         }
 
         let categories: Vec<Category> = self.make_request("get_series_categories", None).await?;
-        
+
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
             self.cache_ttl_seconds,
         );
-        
-        if let Err(e) = self.cache_manager.store_cache(&self.provider_hash, "series_categories", None, categories.clone(), metadata).await {
+
+        if let Err(e) = self
+            .cache_manager
+            .store_cache(
+                &self.provider_hash,
+                "series_categories",
+                None,
+                categories.clone(),
+                metadata,
+            )
+            .await
+        {
             eprintln!("Warning: Failed to cache series categories: {}", e);
         }
 
@@ -355,69 +455,177 @@ impl XTreamAPI {
     }
 
     pub async fn get_live_streams(&mut self, category_id: Option<&str>) -> Result<Vec<Stream>> {
-        if let Ok(Some(cached)) = self.cache_manager.get_cached::<Vec<Stream>>(&self.provider_hash, "live_streams", category_id).await {
+        // Try to get from "All" cache first and filter if needed
+        if let Ok(Some(cached)) = self
+            .cache_manager
+            .get_cached::<Vec<Stream>>(&self.provider_hash, "live_streams", None)
+            .await
+        {
             if !cached.is_expired() {
-                return Ok(cached.data);
+                let filtered_streams = if let Some(cat_id) = category_id {
+                    cached
+                        .data
+                        .into_iter()
+                        .filter(|stream| stream.category_id == cat_id)
+                        .collect()
+                } else {
+                    cached.data
+                };
+                return Ok(filtered_streams);
             }
         }
 
-        let streams: Vec<Stream> = self.make_request("get_live_streams", category_id).await?;
-        
+        // If All cache is expired or missing, fetch fresh data
+        let streams: Vec<Stream> = self.make_request("get_live_streams", None).await?;
+
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
             self.cache_ttl_seconds,
         );
-        
-        if let Err(e) = self.cache_manager.store_cache(&self.provider_hash, "live_streams", category_id, streams.clone(), metadata).await {
+
+        // Always cache the full "All" response
+        if let Err(e) = self
+            .cache_manager
+            .store_cache(
+                &self.provider_hash,
+                "live_streams",
+                None,
+                streams.clone(),
+                metadata,
+            )
+            .await
+        {
             eprintln!("Warning: Failed to cache live streams: {}", e);
         }
 
-        Ok(streams)
+        // Return filtered result if category was specified
+        let result_streams = if let Some(cat_id) = category_id {
+            streams
+                .into_iter()
+                .filter(|stream| stream.category_id == cat_id)
+                .collect()
+        } else {
+            streams
+        };
+
+        Ok(result_streams)
     }
 
     pub async fn get_vod_streams(&mut self, category_id: Option<&str>) -> Result<Vec<Stream>> {
-        if let Ok(Some(cached)) = self.cache_manager.get_cached::<Vec<Stream>>(&self.provider_hash, "vod_streams", category_id).await {
+        // Try to get from "All" cache first and filter if needed
+        if let Ok(Some(cached)) = self
+            .cache_manager
+            .get_cached::<Vec<Stream>>(&self.provider_hash, "vod_streams", None)
+            .await
+        {
             if !cached.is_expired() {
-                return Ok(cached.data);
+                let filtered_streams = if let Some(cat_id) = category_id {
+                    cached
+                        .data
+                        .into_iter()
+                        .filter(|stream| stream.category_id == cat_id)
+                        .collect()
+                } else {
+                    cached.data
+                };
+                return Ok(filtered_streams);
             }
         }
 
-        let streams: Vec<Stream> = self.make_request("get_vod_streams", category_id).await?;
-        
+        // If All cache is expired or missing, fetch fresh data
+        let streams: Vec<Stream> = self.make_request("get_vod_streams", None).await?;
+
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
             self.cache_ttl_seconds,
         );
-        
-        if let Err(e) = self.cache_manager.store_cache(&self.provider_hash, "vod_streams", category_id, streams.clone(), metadata).await {
+
+        // Always cache the full "All" response
+        if let Err(e) = self
+            .cache_manager
+            .store_cache(
+                &self.provider_hash,
+                "vod_streams",
+                None,
+                streams.clone(),
+                metadata,
+            )
+            .await
+        {
             eprintln!("Warning: Failed to cache vod streams: {}", e);
         }
 
-        Ok(streams)
+        // Return filtered result if category was specified
+        let result_streams = if let Some(cat_id) = category_id {
+            streams
+                .into_iter()
+                .filter(|stream| stream.category_id == cat_id)
+                .collect()
+        } else {
+            streams
+        };
+
+        Ok(result_streams)
     }
 
     pub async fn get_series(&mut self, category_id: Option<&str>) -> Result<Vec<SeriesInfo>> {
-        if let Ok(Some(cached)) = self.cache_manager.get_cached::<Vec<SeriesInfo>>(&self.provider_hash, "series", category_id).await {
+        // Try to get from "All" cache first and filter if needed
+        if let Ok(Some(cached)) = self
+            .cache_manager
+            .get_cached::<Vec<SeriesInfo>>(&self.provider_hash, "series", None)
+            .await
+        {
             if !cached.is_expired() {
-                return Ok(cached.data);
+                let filtered_series = if let Some(cat_id) = category_id {
+                    cached
+                        .data
+                        .into_iter()
+                        .filter(|series| series.category_id == cat_id)
+                        .collect()
+                } else {
+                    cached.data
+                };
+                return Ok(filtered_series);
             }
         }
 
-        let series: Vec<SeriesInfo> = self.make_request("get_series", category_id).await?;
-        
+        // If All cache is expired or missing, fetch fresh data
+        let series: Vec<SeriesInfo> = self.make_request("get_series", None).await?;
+
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
             self.cache_ttl_seconds,
         );
-        
-        if let Err(e) = self.cache_manager.store_cache(&self.provider_hash, "series", category_id, series.clone(), metadata).await {
+
+        // Always cache the full "All" response
+        if let Err(e) = self
+            .cache_manager
+            .store_cache(
+                &self.provider_hash,
+                "series",
+                None,
+                series.clone(),
+                metadata,
+            )
+            .await
+        {
             eprintln!("Warning: Failed to cache series: {}", e);
         }
 
-        Ok(series)
+        // Return filtered result if category was specified
+        let result_series = if let Some(cat_id) = category_id {
+            series
+                .into_iter()
+                .filter(|series| series.category_id == cat_id)
+                .collect()
+        } else {
+            series
+        };
+
+        Ok(result_series)
     }
 
     pub fn get_stream_url(
@@ -451,131 +659,143 @@ impl XTreamAPI {
     }
 
     pub async fn clear_cache(&mut self) -> Result<()> {
-        self.cache_manager.clear_provider_cache(&self.provider_hash).await
+        self.cache_manager
+            .clear_provider_cache(&self.provider_hash)
+            .await
     }
 
     pub async fn warm_cache(&mut self) -> Result<()> {
         println!("Warming cache for provider...");
-        
-        // First, warm the categories
-        let mut categories_to_fetch = Vec::new();
-        
-        // Always add "All" categories (empty category_id)
-        categories_to_fetch.push(("live", "all".to_string()));
-        categories_to_fetch.push(("vod", "all".to_string()));
-        categories_to_fetch.push(("series", "all".to_string()));
-        
-        // Warm live categories and collect them for stream fetching
-        if let Ok(Some(cached)) = self.cache_manager.get_cached::<Vec<Category>>(&self.provider_hash, "live_categories", None).await {
+
+        // Warm categories first
+        let mut tasks = Vec::new();
+
+        // Warm live categories
+        if let Ok(Some(cached)) = self
+            .cache_manager
+            .get_cached::<Vec<Category>>(&self.provider_hash, "live_categories", None)
+            .await
+        {
             if cached.is_expired() {
-                if let Ok(categories) = self.get_live_categories().await {
-                    for category in &categories {
-                        categories_to_fetch.push(("live", category.category_id.clone()));
-                    }
-                }
-            } else {
-                for category in &cached.data {
-                    categories_to_fetch.push(("live", category.category_id.clone()));
-                }
+                tasks.push("live_categories");
             }
-        } else if let Ok(categories) = self.get_live_categories().await {
-            for category in &categories {
-                categories_to_fetch.push(("live", category.category_id.clone()));
-            }
+        } else {
+            tasks.push("live_categories");
         }
-        
-        // Warm VOD categories and collect them
-        if let Ok(Some(cached)) = self.cache_manager.get_cached::<Vec<Category>>(&self.provider_hash, "vod_categories", None).await {
+
+        // Warm VOD categories
+        if let Ok(Some(cached)) = self
+            .cache_manager
+            .get_cached::<Vec<Category>>(&self.provider_hash, "vod_categories", None)
+            .await
+        {
             if cached.is_expired() {
-                if let Ok(categories) = self.get_vod_categories().await {
-                    for category in &categories {
-                        categories_to_fetch.push(("vod", category.category_id.clone()));
-                    }
-                }
-            } else {
-                for category in &cached.data {
-                    categories_to_fetch.push(("vod", category.category_id.clone()));
-                }
+                tasks.push("vod_categories");
             }
-        } else if let Ok(categories) = self.get_vod_categories().await {
-            for category in &categories {
-                categories_to_fetch.push(("vod", category.category_id.clone()));
-            }
+        } else {
+            tasks.push("vod_categories");
         }
-        
-        // Warm series categories and collect them
-        if let Ok(Some(cached)) = self.cache_manager.get_cached::<Vec<Category>>(&self.provider_hash, "series_categories", None).await {
+
+        // Warm series categories
+        if let Ok(Some(cached)) = self
+            .cache_manager
+            .get_cached::<Vec<Category>>(&self.provider_hash, "series_categories", None)
+            .await
+        {
             if cached.is_expired() {
-                if let Ok(categories) = self.get_series_categories().await {
-                    for category in &categories {
-                        categories_to_fetch.push(("series", category.category_id.clone()));
-                    }
-                }
-            } else {
-                for category in &cached.data {
-                    categories_to_fetch.push(("series", category.category_id.clone()));
-                }
+                tasks.push("series_categories");
             }
-        } else if let Ok(categories) = self.get_series_categories().await {
-            for category in &categories {
-                categories_to_fetch.push(("series", category.category_id.clone()));
-            }
+        } else {
+            tasks.push("series_categories");
         }
-        
-        let total_categories = categories_to_fetch.len();
-        println!("Warming streams for {} categories...", total_categories);
-        
-        // Now warm the streams for each category
-        let mut warmed_count = 0;
-        for (content_type, category_id) in categories_to_fetch {
-            let category_id_opt = if category_id == "all" { None } else { Some(category_id.as_str()) };
-            
-            let result = match content_type {
-                "live" => {
-                    // Check if already cached and fresh
-                    if let Ok(Some(cached)) = self.cache_manager.get_cached::<Vec<Stream>>(&self.provider_hash, "live_streams", category_id_opt).await {
-                        if !cached.is_expired() {
-                            continue;
-                        }
-                    }
-                    self.get_live_streams(category_id_opt).await.map(|_| ())
-                },
-                "vod" => {
-                    // Check if already cached and fresh
-                    if let Ok(Some(cached)) = self.cache_manager.get_cached::<Vec<Stream>>(&self.provider_hash, "vod_streams", category_id_opt).await {
-                        if !cached.is_expired() {
-                            continue;
-                        }
-                    }
-                    self.get_vod_streams(category_id_opt).await.map(|_| ())
-                },
-                "series" => {
-                    // Check if already cached and fresh
-                    if let Ok(Some(cached)) = self.cache_manager.get_cached::<Vec<SeriesInfo>>(&self.provider_hash, "series", category_id_opt).await {
-                        if !cached.is_expired() {
-                            continue;
-                        }
-                    }
-                    self.get_series(category_id_opt).await.map(|_| ())
-                },
+
+        // Warm categories
+        for task in tasks {
+            let result = match task {
+                "live_categories" => self.get_live_categories().await.map(|_| ()),
+                "vod_categories" => self.get_vod_categories().await.map(|_| ()),
+                "series_categories" => self.get_series_categories().await.map(|_| ()),
                 _ => continue,
             };
-            
+
+            if let Err(e) = result {
+                eprintln!("Warning: Failed to warm {}: {}", task, e);
+            }
+        }
+
+        // Now warm ONLY the "All" streams/series (no individual categories)
+        let mut warmed_count = 0;
+        let content_types = ["live", "vod", "series"];
+
+        println!(
+            "Warming 'All' streams for {} content types...",
+            content_types.len()
+        );
+
+        for content_type in content_types {
+            // Check if All cache already exists and is fresh
+            let cache_key = match content_type {
+                "live" => "live_streams",
+                "vod" => "vod_streams",
+                "series" => "series",
+                _ => continue,
+            };
+
+            let is_cached_and_fresh = match content_type {
+                "live" | "vod" => {
+                    if let Ok(Some(cached)) = self
+                        .cache_manager
+                        .get_cached::<Vec<Stream>>(&self.provider_hash, cache_key, None)
+                        .await
+                    {
+                        !cached.is_expired()
+                    } else {
+                        false
+                    }
+                }
+                "series" => {
+                    if let Ok(Some(cached)) = self
+                        .cache_manager
+                        .get_cached::<Vec<SeriesInfo>>(&self.provider_hash, cache_key, None)
+                        .await
+                    {
+                        !cached.is_expired()
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+
+            if is_cached_and_fresh {
+                continue;
+            }
+
+            let result = match content_type {
+                "live" => self.get_live_streams(None).await.map(|_| ()),
+                "vod" => self.get_vod_streams(None).await.map(|_| ()),
+                "series" => self.get_series(None).await.map(|_| ()),
+                _ => continue,
+            };
+
             match result {
                 Ok(()) => {
                     warmed_count += 1;
-                    if warmed_count % 5 == 0 {
-                        println!("Warmed {}/{} categories...", warmed_count, total_categories);
-                    }
-                },
+                    println!("Warmed 'All' {} streams", content_type);
+                }
                 Err(e) => {
-                    eprintln!("Warning: Failed to warm {} streams for category {}: {}", content_type, category_id, e);
+                    eprintln!(
+                        "Warning: Failed to warm {} 'All' streams: {}",
+                        content_type, e
+                    );
                 }
             }
         }
-        
-        println!("Cache warming complete! Warmed {} categories.", warmed_count);
+
+        println!(
+            "Cache warming complete! Warmed {} 'All' content types.",
+            warmed_count
+        );
         Ok(())
     }
-
 }

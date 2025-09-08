@@ -94,14 +94,22 @@ impl CacheManager {
 
     fn ensure_cache_dir_exists(&self) -> Result<()> {
         if !self.cache_dir.exists() {
-            fs::create_dir_all(&self.cache_dir)
-                .with_context(|| format!("Failed to create cache directory: {}", self.cache_dir.display()))?;
+            fs::create_dir_all(&self.cache_dir).with_context(|| {
+                format!(
+                    "Failed to create cache directory: {}",
+                    self.cache_dir.display()
+                )
+            })?;
         }
 
         let providers_dir = self.cache_dir.join("providers");
         if !providers_dir.exists() {
-            fs::create_dir_all(&providers_dir)
-                .with_context(|| format!("Failed to create providers directory: {}", providers_dir.display()))?;
+            fs::create_dir_all(&providers_dir).with_context(|| {
+                format!(
+                    "Failed to create providers directory: {}",
+                    providers_dir.display()
+                )
+            })?;
         }
 
         Ok(())
@@ -110,8 +118,9 @@ impl CacheManager {
     fn load_provider_index(&mut self) -> Result<()> {
         let index_path = self.cache_dir.join("index.json");
         if index_path.exists() {
-            let content = fs::read_to_string(&index_path)
-                .with_context(|| format!("Failed to read provider index: {}", index_path.display()))?;
+            let content = fs::read_to_string(&index_path).with_context(|| {
+                format!("Failed to read provider index: {}", index_path.display())
+            })?;
             self.provider_index = serde_json::from_str(&content)
                 .with_context(|| "Failed to parse provider index JSON")?;
         }
@@ -127,7 +136,11 @@ impl CacheManager {
         Ok(())
     }
 
-    pub fn get_provider_hash(&mut self, provider_url: &str, _provider_name: Option<&str>) -> Result<String> {
+    pub fn get_provider_hash(
+        &mut self,
+        provider_url: &str,
+        _provider_name: Option<&str>,
+    ) -> Result<String> {
         if let Some(hash) = self.provider_index.get(provider_url) {
             return Ok(hash.clone());
         }
@@ -136,19 +149,29 @@ impl CacheManager {
         hasher.update(provider_url.as_bytes());
         let hash = format!("{:x}", hasher.finalize())[..16].to_string();
 
-        self.provider_index.insert(provider_url.to_string(), hash.clone());
+        self.provider_index
+            .insert(provider_url.to_string(), hash.clone());
         self.save_provider_index()?;
 
         let provider_dir = self.cache_dir.join("providers").join(&hash);
         if !provider_dir.exists() {
-            fs::create_dir_all(&provider_dir)
-                .with_context(|| format!("Failed to create provider cache directory: {}", provider_dir.display()))?;
+            fs::create_dir_all(&provider_dir).with_context(|| {
+                format!(
+                    "Failed to create provider cache directory: {}",
+                    provider_dir.display()
+                )
+            })?;
         }
 
         Ok(hash)
     }
 
-    fn get_cache_path(&self, provider_hash: &str, cache_type: &str, category_id: Option<&str>) -> PathBuf {
+    fn get_cache_path(
+        &self,
+        provider_hash: &str,
+        cache_type: &str,
+        category_id: Option<&str>,
+    ) -> PathBuf {
         let filename = if let Some(cat_id) = category_id {
             let mut hasher = Sha256::new();
             hasher.update(cat_id.as_bytes());
@@ -164,17 +187,23 @@ impl CacheManager {
             .join(filename)
     }
 
-    pub async fn get_cached<T>(&self, provider_hash: &str, cache_type: &str, category_id: Option<&str>) -> Result<Option<CachedData<T>>>
+    pub async fn get_cached<T>(
+        &self,
+        provider_hash: &str,
+        cache_type: &str,
+        category_id: Option<&str>,
+    ) -> Result<Option<CachedData<T>>>
     where
         T: for<'de> Deserialize<'de>,
     {
         let cache_path = self.get_cache_path(provider_hash, cache_type, category_id);
-        
+
         if !cache_path.exists() {
             return Ok(None);
         }
 
-        let content = async_fs::read_to_string(&cache_path).await
+        let content = async_fs::read_to_string(&cache_path)
+            .await
             .with_context(|| format!("Failed to read cache file: {}", cache_path.display()))?;
 
         let cached_data: CachedData<T> = serde_json::from_str(&content)
@@ -183,16 +212,24 @@ impl CacheManager {
         Ok(Some(cached_data))
     }
 
-    pub async fn store_cache<T>(&self, provider_hash: &str, cache_type: &str, category_id: Option<&str>, data: T, metadata: CacheMetadata) -> Result<()>
+    pub async fn store_cache<T>(
+        &self,
+        provider_hash: &str,
+        cache_type: &str,
+        category_id: Option<&str>,
+        data: T,
+        metadata: CacheMetadata,
+    ) -> Result<()>
     where
         T: Serialize,
     {
         let cache_path = self.get_cache_path(provider_hash, cache_type, category_id);
-        
+
         if let Some(parent) = cache_path.parent() {
             if !parent.exists() {
-                async_fs::create_dir_all(parent).await
-                    .with_context(|| format!("Failed to create cache directory: {}", parent.display()))?;
+                async_fs::create_dir_all(parent).await.with_context(|| {
+                    format!("Failed to create cache directory: {}", parent.display())
+                })?;
             }
         }
 
@@ -200,7 +237,8 @@ impl CacheManager {
         let content = serde_json::to_string_pretty(&cached_data)
             .with_context(|| "Failed to serialize cache data")?;
 
-        async_fs::write(&cache_path, content).await
+        async_fs::write(&cache_path, content)
+            .await
             .with_context(|| format!("Failed to write cache file: {}", cache_path.display()))?;
 
         Ok(())
@@ -209,8 +247,14 @@ impl CacheManager {
     pub async fn clear_provider_cache(&self, provider_hash: &str) -> Result<()> {
         let provider_dir = self.cache_dir.join("providers").join(provider_hash);
         if provider_dir.exists() {
-            async_fs::remove_dir_all(&provider_dir).await
-                .with_context(|| format!("Failed to remove provider cache directory: {}", provider_dir.display()))?;
+            async_fs::remove_dir_all(&provider_dir)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to remove provider cache directory: {}",
+                        provider_dir.display()
+                    )
+                })?;
         }
         Ok(())
     }
@@ -218,8 +262,14 @@ impl CacheManager {
     pub async fn clear_all_cache(&self) -> Result<()> {
         let providers_dir = self.cache_dir.join("providers");
         if providers_dir.exists() {
-            async_fs::remove_dir_all(&providers_dir).await
-                .with_context(|| format!("Failed to remove providers cache directory: {}", providers_dir.display()))?;
+            async_fs::remove_dir_all(&providers_dir)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to remove providers cache directory: {}",
+                        providers_dir.display()
+                    )
+                })?;
         }
         self.ensure_cache_dir_exists()?;
         Ok(())
@@ -232,15 +282,22 @@ impl CacheManager {
             .collect()
     }
 
-
-    pub async fn warm_cache<T, F, Fut>(&self, provider_hash: &str, cache_entries: Vec<(String, Option<String>)>, fetcher: F) -> Result<()>
+    pub async fn warm_cache<T, F, Fut>(
+        &self,
+        provider_hash: &str,
+        cache_entries: Vec<(String, Option<String>)>,
+        fetcher: F,
+    ) -> Result<()>
     where
         T: Serialize + for<'de> Deserialize<'de>,
         F: Fn(String, Option<String>) -> Fut,
         Fut: std::future::Future<Output = Result<T>>,
     {
         for (cache_type, category_id) in cache_entries {
-            if let Ok(Some(cached)) = self.get_cached::<T>(provider_hash, &cache_type, category_id.as_deref()).await {
+            if let Ok(Some(cached)) = self
+                .get_cached::<T>(provider_hash, &cache_type, category_id.as_deref())
+                .await
+            {
                 if !cached.is_expired() {
                     continue;
                 }
@@ -248,12 +305,17 @@ impl CacheManager {
 
             match fetcher(cache_type.clone(), category_id.clone()).await {
                 Ok(data) => {
-                    let metadata = CacheMetadata::new(
-                        "".to_string(), 
-                        None,
-                        3600,
-                    );
-                    if let Err(e) = self.store_cache(provider_hash, &cache_type, category_id.as_deref(), data, metadata).await {
+                    let metadata = CacheMetadata::new("".to_string(), None, 3600);
+                    if let Err(e) = self
+                        .store_cache(
+                            provider_hash,
+                            &cache_type,
+                            category_id.as_deref(),
+                            data,
+                            metadata,
+                        )
+                        .await
+                    {
                         eprintln!("Failed to cache {}: {}", cache_type, e);
                     }
                 }

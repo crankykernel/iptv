@@ -154,7 +154,9 @@ impl MenuSystem {
     }
 
     async fn select_provider(&self) -> Result<Option<ProviderConfig>> {
-        let provider_names: Vec<String> = self.providers.iter()
+        let provider_names: Vec<String> = self
+            .providers
+            .iter()
             .map(|p| {
                 p.name.clone().unwrap_or_else(|| {
                     // Extract hostname from URL if no name is provided
@@ -172,7 +174,8 @@ impl MenuSystem {
             .prompt_skippable()?;
 
         if let Some(selected_name) = selection {
-            let selected_index = provider_names.iter()
+            let selected_index = provider_names
+                .iter()
                 .position(|name| name == &selected_name)
                 .unwrap();
             Ok(Some(self.providers[selected_index].clone()))
@@ -182,8 +185,10 @@ impl MenuSystem {
     }
 
     async fn connect_to_provider(&mut self, provider: &ProviderConfig) -> Result<()> {
-        println!("Connecting to provider: {}", 
-            provider.name.as_ref().unwrap_or(&provider.url));
+        println!(
+            "Connecting to provider: {}",
+            provider.name.as_ref().unwrap_or(&provider.url)
+        );
 
         let mut api = XTreamAPI::new(
             provider.url.clone(),
@@ -199,12 +204,12 @@ impl MenuSystem {
                 if user_info.auth == 1 {
                     println!("Connected as: {}", user_info.username);
                     println!("Expires: {}", user_info.exp_date);
-                    
+
                     // Warm the cache on first connection
                     if let Err(e) = api.warm_cache().await {
                         eprintln!("Warning: Failed to warm cache: {}", e);
                     }
-                    
+
                     self.current_api = Some(api);
                     Ok(())
                 } else {
@@ -239,9 +244,10 @@ impl MenuSystem {
         loop {
             // Get categories
             let categories = {
-                let api = self.current_api.as_mut().ok_or_else(|| {
-                    anyhow::anyhow!("No provider connected")
-                })?;
+                let api = self
+                    .current_api
+                    .as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
                 match content_type {
                     ContentType::Live => api.get_live_categories().await?,
                     ContentType::Movies => api.get_vod_categories().await?,
@@ -302,9 +308,10 @@ impl MenuSystem {
 
     async fn browse_streams(&mut self, category_id: Option<&str>, stream_type: &str) -> Result<()> {
         let streams = {
-            let api = self.current_api.as_mut().ok_or_else(|| {
-                anyhow::anyhow!("No provider connected")
-            })?;
+            let api = self
+                .current_api
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
             match stream_type {
                 "live" => api.get_live_streams(category_id).await?,
                 "movie" => api.get_vod_streams(category_id).await?,
@@ -330,10 +337,10 @@ impl MenuSystem {
         loop {
             let mut select = Select::new("Select stream to play:", stream_options.clone())
                 .with_page_size(self.page_size);
-            
+
             // Set the cursor to the last selected item
             select = select.with_starting_cursor(last_selected_index);
-            
+
             let selection = select.prompt_skippable()?;
 
             if let Some(selected_name) = selection {
@@ -348,9 +355,10 @@ impl MenuSystem {
 
                 let selected_stream = &streams[selected_index];
                 let url = {
-                    let api = self.current_api.as_ref().ok_or_else(|| {
-                        anyhow::anyhow!("No provider connected")
-                    })?;
+                    let api = self
+                        .current_api
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
                     api.get_stream_url(selected_stream.stream_id, stream_type, None)
                 };
 
@@ -368,9 +376,10 @@ impl MenuSystem {
 
     async fn browse_series_list(&mut self, category_id: Option<&str>) -> Result<()> {
         let series = {
-            let api = self.current_api.as_mut().ok_or_else(|| {
-                anyhow::anyhow!("No provider connected")
-            })?;
+            let api = self
+                .current_api
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
             api.get_series(category_id).await?
         };
 
@@ -386,10 +395,10 @@ impl MenuSystem {
         loop {
             let mut select = Select::new("Select series:", series_options.clone())
                 .with_page_size(self.page_size);
-            
+
             // Set the cursor to the last selected item
             select = select.with_starting_cursor(last_selected_index);
-            
+
             let selection = select.prompt_skippable()?;
 
             if let Some(selected_name) = selection {
@@ -427,7 +436,7 @@ impl MenuSystem {
 
     async fn refresh_cache(&mut self) -> Result<()> {
         println!("Refreshing cache...");
-        
+
         if let Some(ref mut api) = self.current_api {
             api.clear_cache().await?;
             api.warm_cache().await?;
@@ -435,7 +444,7 @@ impl MenuSystem {
         } else {
             println!("No provider connected");
         }
-        
+
         println!("Press Enter to continue...");
         let _ = std::io::stdin().read_line(&mut String::new());
         Ok(())
@@ -443,17 +452,16 @@ impl MenuSystem {
 
     async fn clear_cache(&mut self) -> Result<()> {
         println!("Clearing cache...");
-        
+
         if let Some(ref mut api) = self.current_api {
             api.clear_cache().await?;
             println!("Cache cleared successfully!");
         } else {
             println!("No provider connected");
         }
-        
+
         println!("Press Enter to continue...");
         let _ = std::io::stdin().read_line(&mut String::new());
         Ok(())
     }
-
 }

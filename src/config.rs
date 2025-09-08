@@ -22,7 +22,6 @@ pub struct ProviderConfig {
     pub password: String,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerConfig {
     pub command: String,
@@ -83,7 +82,6 @@ impl Config {
             Self::default()
         })
     }
-
 
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let content =
