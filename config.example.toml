@@ -1,10 +1,17 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
-[server]
+[[providers]]
+name = "Example Provider 1"
 url = "https://your-server.com:port/player_api.php"
 username = "your-username"
 password = "your-password"
+
+[[providers]]
+name = "Example Provider 2"
+url = "https://another-server.com:port/player_api.php"
+username = "your-username-2"
+password = "your-password-2"
 
 [player]
 command = "mpv"

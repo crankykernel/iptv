@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
-use iptv::{Config, MenuSystem, Player, XTreamAPI};
+use iptv::{Config, MenuSystem, Player};
 
 #[derive(Parser)]
 #[command(name = "iptv")]
@@ -42,19 +42,11 @@ async fn main() -> Result<()> {
         return Ok(());
     };
 
-    // Initialize API client
-    let api = XTreamAPI::new(
-        config.server.url.clone(),
-        config.server.username.clone(),
-        config.server.password.clone(),
-        config.cache.ttl_seconds,
-    )?;
-
     // Initialize player
     let player = Player::new(config.player.clone());
 
     // Initialize and run menu system
-    let mut menu_system = MenuSystem::new(api, player, config.ui.page_size);
+    let mut menu_system = MenuSystem::new(config.providers, player, config.ui.page_size);
     menu_system.run().await?;
 
     Ok(())

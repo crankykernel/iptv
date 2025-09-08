@@ -8,18 +8,20 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub server: ServerConfig,
+    pub providers: Vec<ProviderConfig>,
     pub player: PlayerConfig,
     pub cache: CacheConfig,
     pub ui: UiConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerConfig {
+pub struct ProviderConfig {
+    pub name: Option<String>,
     pub url: String,
     pub username: String,
     pub password: String,
 }
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerConfig {
@@ -42,11 +44,12 @@ pub struct UiConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            server: ServerConfig {
+            providers: vec![ProviderConfig {
+                name: Some("Example Provider".to_string()),
                 url: "https://your-server.com:port/player_api.php".to_string(),
                 username: "your-username".to_string(),
                 password: "your-password".to_string(),
-            },
+            }],
             player: PlayerConfig {
                 command: "mpv".to_string(),
                 args: vec!["--fs".to_string(), "--quiet".to_string()],
@@ -80,6 +83,7 @@ impl Config {
             Self::default()
         })
     }
+
 
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let content =
