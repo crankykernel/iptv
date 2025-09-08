@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
 use crate::player::Player;
-use crate::xtream_api::{Category, SeriesInfo, Stream, XTreamAPI};
+use crate::xtream_api::{Category, XTreamAPI};
 use anyhow::Result;
 use inquire::Select;
 
@@ -63,16 +63,11 @@ impl MenuSystem {
             println!("Warning: Media player not found. Videos may not play correctly.");
         }
 
-        loop {
-            match self.show_main_menu().await? {
-                Some(content_type) => {
-                    if let Err(e) = self.browse_content(content_type).await {
-                        println!("❌ Error: {}", e);
-                        println!("Press Enter to continue...");
-                        let _ = std::io::stdin().read_line(&mut String::new());
-                    }
-                }
-                None => break,
+        while let Some(content_type) = self.show_main_menu().await? {
+            if let Err(e) = self.browse_content(content_type).await {
+                println!("❌ Error: {}", e);
+                println!("Press Enter to continue...");
+                let _ = std::io::stdin().read_line(&mut String::new());
             }
         }
 
