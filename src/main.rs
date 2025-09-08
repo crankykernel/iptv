@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
-use iptv_rust::{Config, MenuSystem, Player, XTreamAPI};
+use iptv::{Config, MenuSystem, Player, XTreamAPI};
 
 #[derive(Parser)]
 #[command(name = "iptv")]

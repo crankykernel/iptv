@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
 [package]
-name = "iptv-rust"
+name = "iptv"
 version = "0.1.0"
 license = "MIT"
 edition = "2024"
