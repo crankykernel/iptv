@@ -21,12 +21,29 @@ pub enum ContentType {
     Series,
 }
 
+#[derive(Debug, Clone)]
+pub enum MainMenuOption {
+    Content(ContentType),
+    RefreshCache,
+    ClearCache,
+}
+
 impl std::fmt::Display for ContentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ContentType::Live => write!(f, "Live TV"),
             ContentType::Movies => write!(f, "Movies (VOD)"),
             ContentType::Series => write!(f, "TV Series"),
+        }
+    }
+}
+
+impl std::fmt::Display for MainMenuOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MainMenuOption::Content(content_type) => write!(f, "{}", content_type),
+            MainMenuOption::RefreshCache => write!(f, "Refresh Cache"),
+            MainMenuOption::ClearCache => write!(f, "Clear Cache"),
         }
     }
 }
@@ -67,12 +84,30 @@ impl MenuSystem {
                     println!("Warning: Media player not found. Videos may not play correctly.");
                 }
 
-                // Run content browsing for this provider
-                while let Some(content_type) = self.show_main_menu().await? {
-                    if let Err(e) = self.browse_content(content_type).await {
-                        println!("❌ Error: {}", e);
-                        println!("Press Enter to continue...");
-                        let _ = std::io::stdin().read_line(&mut String::new());
+                // Run main menu loop for this provider
+                while let Some(menu_option) = self.show_main_menu().await? {
+                    match menu_option {
+                        MainMenuOption::Content(content_type) => {
+                            if let Err(e) = self.browse_content(content_type).await {
+                                println!("❌ Error: {}", e);
+                                println!("Press Enter to continue...");
+                                let _ = std::io::stdin().read_line(&mut String::new());
+                            }
+                        }
+                        MainMenuOption::RefreshCache => {
+                            if let Err(e) = self.refresh_cache().await {
+                                println!("❌ Error refreshing cache: {}", e);
+                                println!("Press Enter to continue...");
+                                let _ = std::io::stdin().read_line(&mut String::new());
+                            }
+                        }
+                        MainMenuOption::ClearCache => {
+                            if let Err(e) = self.clear_cache().await {
+                                println!("❌ Error clearing cache: {}", e);
+                                println!("Press Enter to continue...");
+                                let _ = std::io::stdin().read_line(&mut String::new());
+                            }
+                        }
                     }
                 }
             }
@@ -86,11 +121,29 @@ impl MenuSystem {
                 println!("Warning: Media player not found. Videos may not play correctly.");
             }
 
-            while let Some(content_type) = self.show_main_menu().await? {
-                if let Err(e) = self.browse_content(content_type).await {
-                    println!("❌ Error: {}", e);
-                    println!("Press Enter to continue...");
-                    let _ = std::io::stdin().read_line(&mut String::new());
+            while let Some(menu_option) = self.show_main_menu().await? {
+                match menu_option {
+                    MainMenuOption::Content(content_type) => {
+                        if let Err(e) = self.browse_content(content_type).await {
+                            println!("❌ Error: {}", e);
+                            println!("Press Enter to continue...");
+                            let _ = std::io::stdin().read_line(&mut String::new());
+                        }
+                    }
+                    MainMenuOption::RefreshCache => {
+                        if let Err(e) = self.refresh_cache().await {
+                            println!("❌ Error refreshing cache: {}", e);
+                            println!("Press Enter to continue...");
+                            let _ = std::io::stdin().read_line(&mut String::new());
+                        }
+                    }
+                    MainMenuOption::ClearCache => {
+                        if let Err(e) = self.clear_cache().await {
+                            println!("❌ Error clearing cache: {}", e);
+                            println!("Press Enter to continue...");
+                            let _ = std::io::stdin().read_line(&mut String::new());
+                        }
+                    }
                 }
             }
 
@@ -137,6 +190,7 @@ impl MenuSystem {
             provider.username.clone(),
             provider.password.clone(),
             3600, // Default cache TTL
+            provider.name.clone(),
         )?;
 
         // Verify API connection
@@ -145,6 +199,12 @@ impl MenuSystem {
                 if user_info.auth == 1 {
                     println!("Connected as: {}", user_info.username);
                     println!("Expires: {}", user_info.exp_date);
+                    
+                    // Warm the cache on first connection
+                    if let Err(e) = api.warm_cache().await {
+                        eprintln!("Warning: Failed to warm cache: {}", e);
+                    }
+                    
                     self.current_api = Some(api);
                     Ok(())
                 } else {
@@ -159,10 +219,16 @@ impl MenuSystem {
         }
     }
 
-    async fn show_main_menu(&self) -> Result<Option<ContentType>> {
-        let options = vec![ContentType::Live, ContentType::Movies, ContentType::Series];
+    async fn show_main_menu(&self) -> Result<Option<MainMenuOption>> {
+        let options = vec![
+            MainMenuOption::Content(ContentType::Live),
+            MainMenuOption::Content(ContentType::Movies),
+            MainMenuOption::Content(ContentType::Series),
+            MainMenuOption::RefreshCache,
+            MainMenuOption::ClearCache,
+        ];
 
-        let selection = Select::new("Select content type:", options)
+        let selection = Select::new("Select option:", options)
             .with_page_size(self.page_size)
             .prompt_skippable()?;
 
@@ -358,4 +424,36 @@ impl MenuSystem {
 
         Ok(())
     }
+
+    async fn refresh_cache(&mut self) -> Result<()> {
+        println!("Refreshing cache...");
+        
+        if let Some(ref mut api) = self.current_api {
+            api.clear_cache().await?;
+            api.warm_cache().await?;
+            println!("Cache refreshed successfully!");
+        } else {
+            println!("No provider connected");
+        }
+        
+        println!("Press Enter to continue...");
+        let _ = std::io::stdin().read_line(&mut String::new());
+        Ok(())
+    }
+
+    async fn clear_cache(&mut self) -> Result<()> {
+        println!("Clearing cache...");
+        
+        if let Some(ref mut api) = self.current_api {
+            api.clear_cache().await?;
+            println!("Cache cleared successfully!");
+        } else {
+            println!("No provider connected");
+        }
+        
+        println!("Press Enter to continue...");
+        let _ = std::io::stdin().read_line(&mut String::new());
+        Ok(())
+    }
+
 }
