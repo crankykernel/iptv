@@ -86,7 +86,14 @@ pub struct Stream {
     #[serde(default)]
     pub tv_archive_duration: Option<Value>,
     #[serde(default)]
-    pub is_adult: Option<String>,
+    pub is_adult: Option<Value>,
+    // VOD-specific fields
+    #[serde(default)]
+    pub rating: Option<Value>,
+    #[serde(default)]
+    pub rating_5based: Option<Value>,
+    #[serde(default)]
+    pub container_extension: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -394,4 +401,5 @@ impl XTreamAPI {
         self.series_cache.clear();
     }
 }
+
 
