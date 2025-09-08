@@ -121,6 +121,16 @@ pub struct Stream {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FavouriteStream {
+    pub stream_id: u32,
+    pub name: String,
+    pub stream_type: String,
+    pub provider_hash: String,
+    pub added_date: chrono::DateTime<chrono::Utc>,
+    pub category_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeriesInfo {
     #[serde(default)]
     pub num: u32,
@@ -162,8 +172,8 @@ pub struct XTreamAPI {
     password: String,
     cache_ttl_seconds: u64,
     provider_name: Option<String>,
-    cache_manager: CacheManager,
-    provider_hash: String,
+    pub cache_manager: CacheManager,
+    pub provider_hash: String,
 }
 
 impl XTreamAPI {
