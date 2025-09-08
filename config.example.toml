@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
+
+[server]
+url = "https://your-server.com:port/player_api.php"
+username = "your-username"
+password = "your-password"
+
+[player]
+command = "mpv"
+args = ["--fs", "--quiet"]
+
+[cache]
+ttl_seconds = 3600
+max_entries = 1000
+
+[ui]
+page_size = 20
+search_debounce_ms = 300
