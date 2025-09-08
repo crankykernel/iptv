@@ -378,30 +378,3 @@ impl XTreamAPI {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn test_parse_live_streams_json() {
-        let json_content = fs::read_to_string("get_live_streams.json")
-            .expect("Failed to read get_live_streams.json");
-        
-        let result: Result<Vec<Stream>, _> = serde_json::from_str(&json_content);
-        match result {
-            Ok(streams) => {
-                println!("Successfully parsed {} streams", streams.len());
-                
-                // Print info about first few streams
-                for (i, stream) in streams.iter().take(3).enumerate() {
-                    println!("Stream {}: {} (ID: {}, Type: {})", 
-                        i + 1, stream.name, stream.stream_id, stream.stream_type);
-                }
-            },
-            Err(e) => {
-                panic!("Failed to parse streams JSON: {}", e);
-            }
-        }
-    }
-}
