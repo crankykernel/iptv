@@ -25,18 +25,22 @@ impl Player {
         // Add the URL
         cmd.arg(url);
 
-        // Redirect stdout and stderr to avoid output pollution
-        cmd.stdout(Stdio::null()).stderr(Stdio::null());
-
         println!("Starting player: {} {}", self.config.command, url);
+        println!("Press Ctrl+C or quit the player to return to the menu");
 
-        // Start the process without waiting for it to complete
-        let _child = cmd.spawn().with_context(|| {
+        // Run the process in the foreground and wait for it to complete
+        let status = cmd.status().with_context(|| {
             format!("Failed to execute player command: {}", self.config.command)
         })?;
 
-        println!("Player started successfully (running in background)");
+        if !status.success() {
+            eprintln!("Player exited with error code: {}", status);
+            return Err(anyhow::anyhow!(
+                "Player process failed with exit code: {}", status
+            ));
+        }
 
+        println!("Player exited successfully");
         Ok(())
     }
 
