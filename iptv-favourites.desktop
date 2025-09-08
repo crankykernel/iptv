@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
+
+[Desktop Entry]
+Name=IPTV Favourites
+Comment=Launch IPTV favourite streams via rofi menu
+Exec=%h/.cargo/bin/iptv rofi
+Icon=video-television
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;Player;
+Keywords=iptv;stream;tv;video;rofi;
