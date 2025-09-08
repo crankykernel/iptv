@@ -165,10 +165,16 @@ impl MenuSystem {
             return Ok(());
         }
 
+        let mut last_selected_index = 0;
+
         loop {
-            let selection = Select::new("Select stream to play:", stream_options.clone())
-                .with_page_size(self.page_size)
-                .prompt_skippable()?;
+            let mut select = Select::new("Select stream to play:", stream_options.clone())
+                .with_page_size(self.page_size);
+            
+            // Set the cursor to the last selected item
+            select = select.with_starting_cursor(last_selected_index);
+            
+            let selection = select.prompt_skippable()?;
 
             if let Some(selected_name) = selection {
                 // Find the selected stream
@@ -176,6 +182,9 @@ impl MenuSystem {
                     .iter()
                     .position(|opt| opt == &selected_name)
                     .unwrap();
+
+                // Remember this selection for next time
+                last_selected_index = selected_index;
 
                 let selected_stream = &streams[selected_index];
                 let url = self
@@ -204,16 +213,25 @@ impl MenuSystem {
 
         let series_options: Vec<String> = series.iter().map(|s| s.name.clone()).collect();
 
+        let mut last_selected_index = 0;
+
         loop {
-            let selection = Select::new("Select series:", series_options.clone())
-                .with_page_size(self.page_size)
-                .prompt_skippable()?;
+            let mut select = Select::new("Select series:", series_options.clone())
+                .with_page_size(self.page_size);
+            
+            // Set the cursor to the last selected item
+            select = select.with_starting_cursor(last_selected_index);
+            
+            let selection = select.prompt_skippable()?;
 
             if let Some(selected_name) = selection {
                 let selected_index = series_options
                     .iter()
                     .position(|opt| opt == &selected_name)
                     .unwrap();
+
+                // Remember this selection for next time
+                last_selected_index = selected_index;
 
                 let selected_series = &series[selected_index];
 
