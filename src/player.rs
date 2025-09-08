@@ -31,15 +31,11 @@ impl Player {
 
         println!("Starting player: {} {}", self.config.command, url);
         
-        let status = cmd.status()
+        // Start the process without waiting for it to complete
+        let _child = cmd.spawn()
             .with_context(|| format!("Failed to execute player command: {}", self.config.command))?;
 
-        if !status.success() {
-            return Err(anyhow::anyhow!(
-                "Player exited with non-zero status: {:?}",
-                status.code()
-            ));
-        }
+        println!("Player started successfully (running in background)");
 
         Ok(())
     }

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
 use anyhow::{Context, Result};
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -186,6 +187,15 @@ impl XTreamAPI {
 
         println!("Requesting: {} (action: {}, category: {:?})", url, action, category_id);
 
+        // Create progress bar
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.green} {msg}")
+                .unwrap_or_else(|_| ProgressStyle::default_spinner())
+        );
+        pb.set_message("Sending request...");
+
         let response = self.client
             .get(&url)
             .send()
@@ -193,20 +203,26 @@ impl XTreamAPI {
             .with_context(|| format!("Failed to send request to {}", url))?;
 
         if !response.status().is_success() {
+            pb.finish_and_clear();
             return Err(anyhow::anyhow!(
                 "HTTP request failed with status: {}",
                 response.status()
             ));
         }
 
+        pb.set_message("Downloading response...");
+
         let response_text = response
             .text()
             .await
             .with_context(|| "Failed to get response text")?;
 
+        pb.set_message("Parsing JSON...");
+
         println!("Response size: {} bytes", response_text.len());
 
         if response_text.trim().is_empty() {
+            pb.finish_and_clear();
             return Err(anyhow::anyhow!("Empty response from server"));
         }
 
@@ -220,6 +236,7 @@ impl XTreamAPI {
                 format!("Failed to parse JSON response: {}", truncated_response)
             })?;
 
+        pb.finish_and_clear();
         Ok(json)
     }
 

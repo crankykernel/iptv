@@ -121,8 +121,6 @@ impl MenuSystem {
                     
                     if let Err(e) = result {
                         println!("Error loading content: {}", e);
-                        println!("Press Enter to continue...");
-                        let _ = std::io::stdin().read_line(&mut String::new());
                     }
                 }
                 None => break, // Go back
@@ -165,8 +163,6 @@ impl MenuSystem {
 
         if streams.is_empty() {
             println!("No streams found in this category.");
-            println!("Press Enter to continue...");
-            let _ = std::io::stdin().read_line(&mut String::new());
             return Ok(());
         }
 
@@ -203,9 +199,6 @@ impl MenuSystem {
                 if let Err(e) = self.player.play(&url) {
                     println!("Playback error: {}", e);
                 }
-                
-                println!("Press Enter to continue...");
-                let _ = std::io::stdin().read_line(&mut String::new());
             } else {
                 break; // Go back
             }
@@ -219,8 +212,6 @@ impl MenuSystem {
 
         if series.is_empty() {
             println!("No series found in this category.");
-            println!("Press Enter to continue...");
-            let _ = std::io::stdin().read_line(&mut String::new());
             return Ok(());
         }
 
@@ -256,8 +247,6 @@ impl MenuSystem {
                 }
                 
                 println!("Episode browsing not yet implemented.");
-                println!("Press Enter to continue...");
-                let _ = std::io::stdin().read_line(&mut String::new());
             } else {
                 break;
             }
