@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
+use crate::player::Player;
+use crate::xtream_api::{Category, SeriesInfo, Stream, XTreamAPI};
 use anyhow::Result;
 use inquire::Select;
-use crate::xtream_api::{XTreamAPI, Category, Stream, SeriesInfo};
-use crate::player::Player;
 
 pub struct MenuSystem {
     api: XTreamAPI,
@@ -40,7 +40,7 @@ impl MenuSystem {
 
     pub async fn run(&mut self) -> Result<()> {
         println!("Welcome to IPTV Rust Player!");
-        
+
         // Verify API connection
         match self.api.get_user_info().await {
             Ok(user_info) => {
@@ -81,11 +81,7 @@ impl MenuSystem {
     }
 
     async fn show_main_menu(&self) -> Result<Option<ContentType>> {
-        let options = vec![
-            ContentType::Live,
-            ContentType::Movies, 
-            ContentType::Series,
-        ];
+        let options = vec![ContentType::Live, ContentType::Movies, ContentType::Series];
 
         let selection = Select::new("Select content type:", options)
             .with_page_size(self.page_size)
@@ -104,21 +100,21 @@ impl MenuSystem {
             };
 
             let category = self.select_category(&categories).await?;
-            
+
             match category {
                 Some(cat) => {
-                    let category_id = if cat.category_id == "all" { 
-                        None 
-                    } else { 
-                        Some(cat.category_id.as_str()) 
+                    let category_id = if cat.category_id == "all" {
+                        None
+                    } else {
+                        Some(cat.category_id.as_str())
                     };
-                    
+
                     let result = match content_type {
                         ContentType::Live => self.browse_streams(category_id, "live").await,
                         ContentType::Movies => self.browse_streams(category_id, "movie").await,
                         ContentType::Series => self.browse_series_list(category_id).await,
                     };
-                    
+
                     if let Err(e) = result {
                         println!("Error loading content: {}", e);
                     }
@@ -135,7 +131,7 @@ impl MenuSystem {
             category_name: "All".to_string(),
             parent_id: None,
         }];
-        
+
         options.extend(
             categories
                 .iter()
@@ -144,7 +140,7 @@ impl MenuSystem {
                     category_name: cat.category_name.clone(),
                     parent_id: cat.parent_id,
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
         );
 
         let selection = Select::new("Select category:", options)
@@ -166,10 +162,8 @@ impl MenuSystem {
             return Ok(());
         }
 
-        let stream_options: Vec<String> = streams
-            .iter()
-            .map(|stream| stream.name.clone())
-            .collect();
+        let stream_options: Vec<String> =
+            streams.iter().map(|stream| stream.name.clone()).collect();
 
         if stream_options.is_empty() {
             println!("No streams available.");
@@ -187,13 +181,11 @@ impl MenuSystem {
                     .iter()
                     .position(|opt| opt == &selected_name)
                     .unwrap();
-                
+
                 let selected_stream = &streams[selected_index];
-                let url = self.api.get_stream_url(
-                    selected_stream.stream_id,
-                    stream_type,
-                    None,
-                );
+                let url = self
+                    .api
+                    .get_stream_url(selected_stream.stream_id, stream_type, None);
 
                 println!("Playing: {}", selected_stream.name);
                 if let Err(e) = self.player.play(&url) {
@@ -215,10 +207,7 @@ impl MenuSystem {
             return Ok(());
         }
 
-        let series_options: Vec<String> = series
-            .iter()
-            .map(|s| s.name.clone())
-            .collect();
+        let series_options: Vec<String> = series.iter().map(|s| s.name.clone()).collect();
 
         loop {
             let selection = Select::new("Select series:", series_options.clone())
@@ -230,9 +219,9 @@ impl MenuSystem {
                     .iter()
                     .position(|opt| opt == &selected_name)
                     .unwrap();
-                
+
                 let selected_series = &series[selected_index];
-                
+
                 // For series, we would need to fetch episodes here
                 // This is a simplified version that shows series info
                 println!("Series: {}", selected_series.name);
@@ -245,7 +234,7 @@ impl MenuSystem {
                 if let Some(ref release_date) = selected_series.release_date {
                     println!("Release: {}", release_date);
                 }
-                
+
                 println!("Episode browsing not yet implemented.");
             } else {
                 break;

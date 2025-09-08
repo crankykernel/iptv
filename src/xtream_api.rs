@@ -144,7 +144,7 @@ pub struct XTreamAPI {
     username: String,
     password: String,
     cache_ttl: Duration,
-    
+
     // Cache storage
     user_info_cache: Option<CacheEntry<UserInfo>>,
     categories_cache: HashMap<String, CacheEntry<Vec<Category>>>,
@@ -153,14 +153,27 @@ pub struct XTreamAPI {
 }
 
 impl XTreamAPI {
-    pub fn new(server_url: String, username: String, password: String, cache_ttl_seconds: u64) -> Result<Self> {
-        let url = reqwest::Url::parse(&server_url)
-            .with_context(|| "Invalid server URL")?;
-        
+    pub fn new(
+        server_url: String,
+        username: String,
+        password: String,
+        cache_ttl_seconds: u64,
+    ) -> Result<Self> {
+        let url = reqwest::Url::parse(&server_url).with_context(|| "Invalid server URL")?;
+
         let base_url = if let Some(port) = url.port() {
-            format!("{}://{}:{}", url.scheme(), url.host_str().unwrap_or("localhost"), port)
+            format!(
+                "{}://{}:{}",
+                url.scheme(),
+                url.host_str().unwrap_or("localhost"),
+                port
+            )
         } else {
-            format!("{}://{}", url.scheme(), url.host_str().unwrap_or("localhost"))
+            format!(
+                "{}://{}",
+                url.scheme(),
+                url.host_str().unwrap_or("localhost")
+            )
         };
 
         Ok(Self {
@@ -192,18 +205,22 @@ impl XTreamAPI {
             url.push_str(&format!("&category_id={}", cat_id));
         }
 
-        println!("Requesting: {} (action: {}, category: {:?})", url, action, category_id);
+        println!(
+            "Requesting: {} (action: {}, category: {:?})",
+            url, action, category_id
+        );
 
-        // Create progress bar
+        // Create progress bar with indefinite style showing bytes received
         let pb = ProgressBar::new_spinner();
         pb.set_style(
             ProgressStyle::default_spinner()
-                .template("{spinner:.green} {msg}")
-                .unwrap_or_else(|_| ProgressStyle::default_spinner())
+                .template("{spinner:.green} {msg} [{elapsed_precise}] {bytes}")
+                .unwrap_or_else(|_| ProgressStyle::default_spinner()),
         );
         pb.set_message("Sending request...");
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .send()
             .await
@@ -217,31 +234,60 @@ impl XTreamAPI {
             ));
         }
 
-        pb.set_message("Downloading response...");
+        pb.set_message("Downloading...");
 
-        let response_text = response
-            .text()
-            .await
-            .with_context(|| "Failed to get response text")?;
+        // Stream the response and track bytes
+        let mut response_bytes = Vec::new();
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk_result) = futures_util::StreamExt::next(&mut stream).await {
+            let chunk = chunk_result.with_context(|| "Failed to read response chunk")?;
+
+            response_bytes.extend_from_slice(&chunk);
+            pb.set_position(response_bytes.len() as u64);
+
+            // Format bytes nicely
+            let bytes_str = if response_bytes.len() < 1024 {
+                format!("{} B", response_bytes.len())
+            } else if response_bytes.len() < 1024 * 1024 {
+                format!("{:.1} KB", response_bytes.len() as f64 / 1024.0)
+            } else {
+                format!("{:.1} MB", response_bytes.len() as f64 / (1024.0 * 1024.0))
+            };
+
+            let message = format!("Downloading... {}", bytes_str);
+            pb.set_message(message);
+        }
 
         pb.set_message("Parsing JSON...");
 
-        println!("Response size: {} bytes", response_text.len());
+        println!("Response size: {} bytes", response_bytes.len());
+
+        if response_bytes.is_empty() {
+            pb.finish_and_clear();
+            return Err(anyhow::anyhow!("Empty response from server"));
+        }
+
+        let response_text = String::from_utf8(response_bytes)
+            .with_context(|| "Failed to convert response to UTF-8 string")?;
 
         if response_text.trim().is_empty() {
             pb.finish_and_clear();
             return Err(anyhow::anyhow!("Empty response from server"));
         }
 
-        let json: T = serde_json::from_str(&response_text)
-            .with_context(|| {
-                let truncated_response = if response_text.len() > 500 {
-                    format!("{}... (truncated {} bytes)", &response_text[..500], response_text.len())
-                } else {
-                    response_text.clone()
-                };
-                format!("Failed to parse JSON response: {}", truncated_response)
-            })?;
+        let json: T = serde_json::from_str(&response_text).with_context(|| {
+            let truncated_response = if response_text.len() > 500 {
+                format!(
+                    "{}... (truncated {} bytes)",
+                    &response_text[..500],
+                    response_text.len()
+                )
+            } else {
+                response_text.clone()
+            };
+            format!("Failed to parse JSON response: {}", truncated_response)
+        })?;
 
         pb.finish_and_clear();
         Ok(json)
@@ -257,13 +303,13 @@ impl XTreamAPI {
         let response: UserInfoResponse = self.make_request("get_user_info", None).await?;
         let user_info = response.user_info;
         self.user_info_cache = Some(CacheEntry::new(user_info.clone(), self.cache_ttl));
-        
+
         Ok(user_info)
     }
 
     pub async fn get_live_categories(&mut self) -> Result<Vec<Category>> {
         let cache_key = "live".to_string();
-        
+
         if let Some(entry) = self.categories_cache.get(&cache_key) {
             if !entry.is_expired() {
                 return Ok(entry.data.clone());
@@ -272,16 +318,16 @@ impl XTreamAPI {
 
         let categories: Vec<Category> = self.make_request("get_live_categories", None).await?;
         self.categories_cache.insert(
-            cache_key, 
-            CacheEntry::new(categories.clone(), self.cache_ttl)
+            cache_key,
+            CacheEntry::new(categories.clone(), self.cache_ttl),
         );
-        
+
         Ok(categories)
     }
 
     pub async fn get_vod_categories(&mut self) -> Result<Vec<Category>> {
         let cache_key = "vod".to_string();
-        
+
         if let Some(entry) = self.categories_cache.get(&cache_key) {
             if !entry.is_expired() {
                 return Ok(entry.data.clone());
@@ -291,15 +337,15 @@ impl XTreamAPI {
         let categories: Vec<Category> = self.make_request("get_vod_categories", None).await?;
         self.categories_cache.insert(
             cache_key,
-            CacheEntry::new(categories.clone(), self.cache_ttl)
+            CacheEntry::new(categories.clone(), self.cache_ttl),
         );
-        
+
         Ok(categories)
     }
 
     pub async fn get_series_categories(&mut self) -> Result<Vec<Category>> {
         let cache_key = "series".to_string();
-        
+
         if let Some(entry) = self.categories_cache.get(&cache_key) {
             if !entry.is_expired() {
                 return Ok(entry.data.clone());
@@ -309,15 +355,15 @@ impl XTreamAPI {
         let categories: Vec<Category> = self.make_request("get_series_categories", None).await?;
         self.categories_cache.insert(
             cache_key,
-            CacheEntry::new(categories.clone(), self.cache_ttl)
+            CacheEntry::new(categories.clone(), self.cache_ttl),
         );
-        
+
         Ok(categories)
     }
 
     pub async fn get_live_streams(&mut self, category_id: Option<&str>) -> Result<Vec<Stream>> {
         let cache_key = format!("live_{}", category_id.unwrap_or("all"));
-        
+
         if let Some(entry) = self.streams_cache.get(&cache_key) {
             if !entry.is_expired() {
                 return Ok(entry.data.clone());
@@ -325,17 +371,15 @@ impl XTreamAPI {
         }
 
         let streams: Vec<Stream> = self.make_request("get_live_streams", category_id).await?;
-        self.streams_cache.insert(
-            cache_key,
-            CacheEntry::new(streams.clone(), self.cache_ttl)
-        );
-        
+        self.streams_cache
+            .insert(cache_key, CacheEntry::new(streams.clone(), self.cache_ttl));
+
         Ok(streams)
     }
 
     pub async fn get_vod_streams(&mut self, category_id: Option<&str>) -> Result<Vec<Stream>> {
         let cache_key = format!("vod_{}", category_id.unwrap_or("all"));
-        
+
         if let Some(entry) = self.streams_cache.get(&cache_key) {
             if !entry.is_expired() {
                 return Ok(entry.data.clone());
@@ -343,17 +387,15 @@ impl XTreamAPI {
         }
 
         let streams: Vec<Stream> = self.make_request("get_vod_streams", category_id).await?;
-        self.streams_cache.insert(
-            cache_key,
-            CacheEntry::new(streams.clone(), self.cache_ttl)
-        );
-        
+        self.streams_cache
+            .insert(cache_key, CacheEntry::new(streams.clone(), self.cache_ttl));
+
         Ok(streams)
     }
 
     pub async fn get_series(&mut self, category_id: Option<&str>) -> Result<Vec<SeriesInfo>> {
         let cache_key = format!("series_{}", category_id.unwrap_or("all"));
-        
+
         if let Some(entry) = self.series_cache.get(&cache_key) {
             if !entry.is_expired() {
                 return Ok(entry.data.clone());
@@ -361,15 +403,18 @@ impl XTreamAPI {
         }
 
         let series: Vec<SeriesInfo> = self.make_request("get_series", category_id).await?;
-        self.series_cache.insert(
-            cache_key,
-            CacheEntry::new(series.clone(), self.cache_ttl)
-        );
-        
+        self.series_cache
+            .insert(cache_key, CacheEntry::new(series.clone(), self.cache_ttl));
+
         Ok(series)
     }
 
-    pub fn get_stream_url(&self, stream_id: u32, stream_type: &str, extension: Option<&str>) -> String {
+    pub fn get_stream_url(
+        &self,
+        stream_id: u32,
+        stream_type: &str,
+        extension: Option<&str>,
+    ) -> String {
         let ext = extension.unwrap_or("m3u8");
         let url = match stream_type {
             "live" => format!(
@@ -389,7 +434,7 @@ impl XTreamAPI {
                 self.base_url, self.username, self.password, stream_id, ext
             ),
         };
-        
+
         println!("Stream URL: {}", url);
         url
     }
@@ -401,5 +446,3 @@ impl XTreamAPI {
         self.series_cache.clear();
     }
 }
-
-

@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
-use iptv_rust::{Config, XTreamAPI, Player, MenuSystem};
+use iptv_rust::{Config, MenuSystem, Player, XTreamAPI};
 
 #[derive(Parser)]
 #[command(name = "iptv")]
@@ -35,10 +35,10 @@ async fn main() -> Result<()> {
         eprintln!("Config file not found at: {}", config_path.display());
         eprintln!("Creating example config at: config.example.toml");
         eprintln!("Please copy and edit it to config.toml");
-        
+
         let example_config = Config::default();
         example_config.save("config.example.toml")?;
-        
+
         return Ok(());
     };
 
