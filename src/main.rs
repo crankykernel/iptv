@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     } else {
         EnvFilter::new("info")
     };
-    
+
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
@@ -42,9 +42,26 @@ async fn main() -> Result<()> {
 
     // Determine config file path
     let config_path = cli.config.unwrap_or_else(|| {
-        std::env::current_dir()
+        // First check for config.toml in current directory
+        let local_config = std::env::current_dir()
             .unwrap_or_default()
-            .join("config.toml")
+            .join("config.toml");
+
+        if local_config.exists() {
+            return local_config;
+        }
+
+        // Fallback to ~/.config/iptv.toml
+        if let Some(home_dir) = std::env::var_os("HOME") {
+            let user_config = PathBuf::from(home_dir).join(".config").join("iptv.toml");
+
+            if user_config.exists() {
+                return user_config;
+            }
+        }
+
+        // Default to current directory if neither exists
+        local_config
     });
 
     // Load configuration
@@ -52,6 +69,7 @@ async fn main() -> Result<()> {
         Config::load(&config_path)?
     } else {
         eprintln!("Config file not found at: {}", config_path.display());
+        eprintln!("Also checked: ~/.config/iptv.toml");
         eprintln!("Creating example config at: config.example.toml");
         eprintln!("Please copy and edit it to config.toml");
 
