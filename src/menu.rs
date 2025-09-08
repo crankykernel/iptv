@@ -8,6 +8,7 @@ use anyhow::Result;
 use inquire::Select;
 use tracing::{info, warn};
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 
 pub struct MenuSystem {
     providers: Vec<ProviderConfig>,
@@ -334,8 +335,87 @@ impl MenuSystem {
             return Ok(());
         }
 
-        let stream_options: Vec<String> =
-            streams.iter().map(|stream| stream.name.clone()).collect();
+        // Create stream display options and maintain mapping for de-duplicated movies
+        let (stream_options, display_to_stream_map): (Vec<String>, HashMap<String, usize>) = 
+            if category_id.is_none() || category_id == Some("all") {
+                // For "All" category, include category names in brackets
+                let category_map = match stream_type {
+                    "live" => {
+                        let api = self
+                            .current_api
+                            .as_mut()
+                            .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
+                        let categories = api.get_live_categories().await?;
+                        categories.into_iter()
+                            .map(|cat| (cat.category_id, cat.category_name))
+                            .collect::<HashMap<String, String>>()
+                    }
+                    "movie" => {
+                        let api = self
+                            .current_api
+                            .as_mut()
+                            .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
+                        let categories = api.get_vod_categories().await?;
+                        categories.into_iter()
+                            .map(|cat| (cat.category_id, cat.category_name))
+                            .collect::<HashMap<String, String>>()
+                    }
+                    _ => HashMap::new(),
+                };
+                
+                if stream_type == "movie" {
+                    // For movies, de-duplicate by stream_id and collect all categories
+                    let mut movie_map: HashMap<u32, (String, Vec<String>, usize)> = HashMap::new();
+                    
+                    for (index, stream) in streams.iter().enumerate() {
+                        let category_name = category_map.get(&stream.category_id)
+                            .cloned()
+                            .unwrap_or_else(|| "Unknown".to_string());
+                        
+                        movie_map.entry(stream.stream_id)
+                            .and_modify(|(_, categories, _)| categories.push(category_name.clone()))
+                            .or_insert_with(|| (stream.name.clone(), vec![category_name], index));
+                    }
+                    
+                    let mut options = Vec::new();
+                    let mut mapping = HashMap::new();
+                    
+                    for (name, categories, first_index) in movie_map.values() {
+                        let display_name = if categories.is_empty() {
+                            name.clone()
+                        } else {
+                            format!("{} [{}]", name, categories.join(", "))
+                        };
+                        mapping.insert(display_name.clone(), *first_index);
+                        options.push(display_name);
+                    }
+                    
+                    (options, mapping)
+                } else {
+                    // For live streams, show individual streams with their category
+                    let options: Vec<String> = streams.iter().map(|stream| {
+                        if let Some(category_name) = category_map.get(&stream.category_id) {
+                            format!("{} [{}]", stream.name, category_name)
+                        } else {
+                            stream.name.clone()
+                        }
+                    }).collect();
+                    
+                    // Create 1:1 mapping for non-deduplicated streams
+                    let mapping = options.iter().enumerate()
+                        .map(|(index, name)| (name.clone(), index))
+                        .collect();
+                    
+                    (options, mapping)
+                }
+            } else {
+                // For specific categories, just show stream names
+                let options: Vec<String> = streams.iter().map(|stream| stream.name.clone()).collect();
+                let mapping = options.iter().enumerate()
+                    .map(|(index, name)| (name.clone(), index))
+                    .collect();
+                (options, mapping)
+            };
 
         if stream_options.is_empty() {
             println!("No streams available.");
@@ -354,16 +434,22 @@ impl MenuSystem {
             let selection = select.prompt_skippable()?;
 
             if let Some(selected_name) = selection {
-                // Find the selected stream
-                let selected_index = stream_options
+                // Find the selected stream using the mapping
+                let display_index = stream_options
                     .iter()
                     .position(|opt| opt == &selected_name)
                     .unwrap();
 
                 // Remember this selection for next time
-                last_selected_index = selected_index;
+                last_selected_index = display_index;
 
-                let selected_stream = &streams[selected_index];
+                // Get the actual stream index from the mapping
+                let stream_index = display_to_stream_map
+                    .get(&selected_name)
+                    .copied()
+                    .unwrap_or(display_index);
+
+                let selected_stream = &streams[stream_index];
                 let url = {
                     let api = self
                         .current_api
