@@ -19,9 +19,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(0),     // Content
-            Constraint::Length(3),  // Footer
+            Constraint::Length(3), // Header
+            Constraint::Min(0),    // Content
+            Constraint::Length(3), // Footer
         ])
         .split(size);
 
@@ -51,9 +51,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
     let header_text = match &app.state {
         AppState::ProviderSelection => "Select Provider",
         AppState::MainMenu => "IPTV Player",
-        AppState::CategorySelection(content_type) => {
-            &format!("{} - Categories", content_type)
-        }
+        AppState::CategorySelection(content_type) => &format!("{} - Categories", content_type),
         AppState::StreamSelection(content_type, category) => {
             &format!("{} - {}", content_type, category.category_name)
         }
@@ -67,7 +65,11 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let header = Paragraph::new(header_text)
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .alignment(Alignment::Center)
         .block(
             Block::default()
@@ -83,8 +85,8 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Min(50),      // Main content
-            Constraint::Length(40),   // Side panel (logs/info)
+            Constraint::Min(50),    // Main content
+            Constraint::Length(40), // Side panel (logs/info)
         ])
         .split(area);
 
@@ -124,29 +126,31 @@ fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .map(|(i, item)| {
             let index = start + i;
             let content = if index == app.selected_index {
-                Line::from(vec![
-                    Span::raw(" ▶ "),
-                    Span::raw(item),
-                ])
-                .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                Line::from(vec![Span::raw(" ▶ "), Span::raw(item)]).style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
             } else {
-                Line::from(vec![
-                    Span::raw("   "),
-                    Span::raw(item),
-                ])
+                Line::from(vec![Span::raw("   "), Span::raw(item)])
             };
             ListItem::new(content)
         })
         .collect();
 
-    let list = List::new(items)
-        .style(Style::default().fg(Color::White));
+    let list = List::new(items).style(Style::default().fg(Color::White));
 
     frame.render_widget(list, inner_area);
 
     // Draw scrollbar if needed
     if app.items.len() > visible_height {
-        draw_scrollbar(frame, inner_area, app.scroll_offset, app.items.len(), visible_height);
+        draw_scrollbar(
+            frame,
+            inner_area,
+            app.scroll_offset,
+            app.items.len(),
+            visible_height,
+        );
     }
 }
 
@@ -154,8 +158,8 @@ fn draw_side_panel(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(10),     // Logs
-            Constraint::Length(5),   // Progress (if any)
+            Constraint::Min(10),   // Logs
+            Constraint::Length(5), // Progress (if any)
         ])
         .split(area);
 
@@ -186,17 +190,13 @@ fn draw_logs_panel(frame: &mut Frame, app: &App, area: Rect) {
     // Show most recent logs that fit in the area
     let visible_count = inner_area.height as usize;
     let start = app.logs.len().saturating_sub(visible_count);
-    
+
     let log_lines: Vec<Line> = app.logs[start..]
         .iter()
-        .map(|(_, msg)| {
-            Line::from(msg.clone())
-                .style(Style::default().fg(Color::Gray))
-        })
+        .map(|(_, msg)| Line::from(msg.clone()).style(Style::default().fg(Color::Gray)))
         .collect();
 
-    let logs = Paragraph::new(log_lines)
-        .wrap(Wrap { trim: true });
+    let logs = Paragraph::new(log_lines).wrap(Wrap { trim: true });
 
     frame.render_widget(logs, inner_area);
 }
@@ -282,13 +282,16 @@ fn draw_scrollbar(frame: &mut Frame, area: Rect, offset: usize, total: usize, vi
     let scrollbar_size = (visible * scrollbar_height) / total;
 
     let mut scrollbar_chars = vec!['│'; scrollbar_height];
-    for i in scrollbar_chars.iter_mut().skip(scrollbar_pos).take(scrollbar_size) {
+    for i in scrollbar_chars
+        .iter_mut()
+        .skip(scrollbar_pos)
+        .take(scrollbar_size)
+    {
         *i = '█';
     }
 
     let scrollbar_text: String = scrollbar_chars.into_iter().collect();
-    let scrollbar = Paragraph::new(scrollbar_text)
-        .style(Style::default().fg(Color::DarkGray));
+    let scrollbar = Paragraph::new(scrollbar_text).style(Style::default().fg(Color::DarkGray));
 
     let scrollbar_area = Rect {
         x: area.x + area.width - 1,

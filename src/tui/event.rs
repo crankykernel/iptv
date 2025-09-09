@@ -52,10 +52,10 @@ impl EventHandler {
             }
         });
 
-        Self { 
+        Self {
             #[allow(dead_code)]
-            sender, 
-            receiver 
+            sender,
+            receiver,
         }
     }
 

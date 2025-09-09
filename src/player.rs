@@ -23,7 +23,7 @@ impl Clone for Player {
 
 impl Player {
     pub fn new(config: PlayerConfig) -> Self {
-        Self { 
+        Self {
             config,
             current_process: Arc::new(Mutex::new(None)),
         }
@@ -101,40 +101,40 @@ impl Player {
     pub async fn play_tui(&self, url: &str) -> Result<()> {
         // Stop any existing playback first
         self.stop_tui().await?;
-        
+
         let mut cmd = Command::new(&self.config.command);
-        
+
         // Add configured arguments
         for arg in &self.config.args {
             cmd.arg(arg);
         }
-        
+
         // Add arguments to suppress terminal output and run in pseudo-gui mode
         // These work for mpv - might need adjustment for other players
         cmd.arg("--no-terminal");
         cmd.arg("--force-window=yes");
         cmd.arg("--keep-open=no");
-        
+
         // Add the URL
         cmd.arg(url);
-        
+
         // Redirect all output to null to prevent terminal interference
         cmd.stdout(Stdio::null())
             .stderr(Stdio::null())
             .stdin(Stdio::null());
-        
+
         // Spawn the process
-        let child = cmd.spawn().with_context(|| {
-            format!("Failed to start player: {}", self.config.command)
-        })?;
-        
+        let child = cmd
+            .spawn()
+            .with_context(|| format!("Failed to start player: {}", self.config.command))?;
+
         // Store the process handle
         let mut process_guard = self.current_process.lock().await;
         *process_guard = Some(child);
-        
+
         Ok(())
     }
-    
+
     /// Stop TUI playback
     pub async fn stop_tui(&self) -> Result<()> {
         let mut process_guard = self.current_process.lock().await;
@@ -146,7 +146,7 @@ impl Player {
         }
         Ok(())
     }
-    
+
     /// Check if player is currently running in TUI mode
     pub async fn is_playing_tui(&self) -> bool {
         let mut process_guard = self.current_process.lock().await;

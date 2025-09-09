@@ -31,13 +31,19 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 pub fn create_help_widget() -> Paragraph<'static> {
     let help_text = vec![
         Line::from(""),
-        Line::from(vec![
-            Span::styled("IPTV Player TUI - Help", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "IPTV Player TUI - Help",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Navigation:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Navigation:",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("  ↑/k       - Move up"),
         Line::from("  ↓/j       - Move down"),
         Line::from("  PgUp      - Page up (10 items)"),
@@ -48,17 +54,23 @@ pub fn create_help_widget() -> Paragraph<'static> {
         Line::from("  Esc/b     - Go back"),
         Line::from("  q         - Quit application"),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Special Keys:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Special Keys:",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("  f       - Toggle favourite (in stream/favourite lists)"),
         Line::from("  s       - Stop playback (when playing)"),
         Line::from("  ?/F1    - Toggle this help"),
         Line::from("  Ctrl+C  - Force quit"),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Features:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Features:",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("  • Browse Live TV, Movies, and TV Series"),
         Line::from("  • Manage favourites with quick access"),
         Line::from("  • Cache management for faster loading"),

@@ -54,9 +54,7 @@ impl Default for Config {
                 command: "mpv".to_string(),
                 args: vec!["--fs".to_string(), "--quiet".to_string()],
             },
-            cache: CacheConfig {
-                max_entries: 1000,
-            },
+            cache: CacheConfig { max_entries: 1000 },
             ui: UiConfig {
                 page_size: 20,
                 search_debounce_ms: 300,

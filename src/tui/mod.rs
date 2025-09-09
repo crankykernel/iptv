@@ -77,25 +77,24 @@ pub async fn run_tui(providers: Vec<ProviderConfig>, player: Player) -> Result<(
 async fn run_app(tui: &mut Tui, app: &mut App) -> Result<()> {
     // Draw once initially
     tui.draw(app)?;
-    
+
     loop {
         // Use timeout to periodically update even without events
         let event = tokio::time::timeout(
             std::time::Duration::from_millis(1000), // Update every second if no events
-            tui.event_handler.next()
-        ).await;
+            tui.event_handler.next(),
+        )
+        .await;
 
         let should_redraw = match event {
             Ok(Ok(Event::Key(key_event))) => {
-                if let Some(action) = app.handle_key_event(key_event).await {
-                    if let app::Action::Quit = action { 
-                        break;
-                    }
+                if let Some(app::Action::Quit) = app.handle_key_event(key_event).await {
+                    break;
                 }
                 true // Always redraw after key events
             }
             Ok(Ok(Event::Resize(_, _))) => true, // Redraw on resize
-            Ok(Ok(Event::Mouse(_))) => false, // Don't redraw on mouse events we don't handle
+            Ok(Ok(Event::Mouse(_))) => false,    // Don't redraw on mouse events we don't handle
             Ok(Ok(Event::Tick)) => {
                 app.tick();
                 false // Don't redraw on ticks unless something changed

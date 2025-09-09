@@ -3,7 +3,7 @@
 
 use crate::config::ProviderConfig;
 use crate::player::Player;
-use crate::xtream_api::{Category, XTreamAPI, Episode, Season};
+use crate::xtream_api::{Category, Episode, Season, XTreamAPI};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use inquire::Select;
@@ -616,8 +616,11 @@ impl MenuSystem {
 
                 if stream_type == "movie" {
                     // For movies, show info directly without the action menu
-                    match self.handle_movie_playback(selected_stream.stream_id, &selected_stream.name).await {
-                        Ok(_) => {},
+                    match self
+                        .handle_movie_playback(selected_stream.stream_id, &selected_stream.name)
+                        .await
+                    {
+                        Ok(_) => {}
                         Err(e) => {
                             println!("Movie playback error: {}", e);
                         }
@@ -651,55 +654,56 @@ impl MenuSystem {
 
                     match action_selection {
                         Some("▶ Play Stream") => {
-                            let url = api.get_stream_url(selected_stream.stream_id, stream_type, None);
+                            let url =
+                                api.get_stream_url(selected_stream.stream_id, stream_type, None);
                             println!("Playing: {}", selected_stream.name);
                             if let Err(e) = self.player.play(&url) {
                                 println!("Playback error: {}", e);
                             }
                         }
-                    Some("⭐ Add to Favourites") => {
-                        let api_mut = self
-                            .current_api
-                            .as_mut()
-                            .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
+                        Some("⭐ Add to Favourites") => {
+                            let api_mut = self
+                                .current_api
+                                .as_mut()
+                                .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
 
-                        use crate::xtream_api::FavouriteStream;
-                        use chrono::Utc;
+                            use crate::xtream_api::FavouriteStream;
+                            use chrono::Utc;
 
-                        let favourite = FavouriteStream {
-                            stream_id: selected_stream.stream_id,
-                            name: selected_stream.name.clone(),
-                            stream_type: stream_type.to_string(),
-                            provider_hash: api_mut.provider_hash.clone(),
-                            added_date: Utc::now(),
-                            category_id: selected_stream.category_id.clone(),
-                        };
+                            let favourite = FavouriteStream {
+                                stream_id: selected_stream.stream_id,
+                                name: selected_stream.name.clone(),
+                                stream_type: stream_type.to_string(),
+                                provider_hash: api_mut.provider_hash.clone(),
+                                added_date: Utc::now(),
+                                category_id: selected_stream.category_id.clone(),
+                            };
 
-                        api_mut
-                            .cache_manager
-                            .add_favourite(&api_mut.provider_hash, favourite)
-                            .await?;
+                            api_mut
+                                .cache_manager
+                                .add_favourite(&api_mut.provider_hash, favourite)
+                                .await?;
 
-                        println!("Added '{}' to favourites!", selected_stream.name);
-                    }
-                    Some("🗑 Remove from Favourites") => {
-                        let api_mut = self
-                            .current_api
-                            .as_mut()
-                            .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
+                            println!("Added '{}' to favourites!", selected_stream.name);
+                        }
+                        Some("🗑 Remove from Favourites") => {
+                            let api_mut = self
+                                .current_api
+                                .as_mut()
+                                .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
 
-                        api_mut
-                            .cache_manager
-                            .remove_favourite(
-                                &api_mut.provider_hash,
-                                selected_stream.stream_id,
-                                stream_type,
-                            )
-                            .await?;
+                            api_mut
+                                .cache_manager
+                                .remove_favourite(
+                                    &api_mut.provider_hash,
+                                    selected_stream.stream_id,
+                                    stream_type,
+                                )
+                                .await?;
 
-                        println!("Removed '{}' from favourites", selected_stream.name);
-                    }
-                    _ => {} // Back/Cancel
+                            println!("Removed '{}' from favourites", selected_stream.name);
+                        }
+                        _ => {} // Back/Cancel
                     }
                 }
             } else {
@@ -751,7 +755,7 @@ impl MenuSystem {
                 // Fetch detailed series information with episodes
                 println!("Loading episodes for: {}", selected_series.name);
                 match self.browse_episodes(selected_series.series_id).await {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err(e) => {
                         println!("Failed to load episodes: {}", e);
                         println!("Press Enter to continue...");
@@ -774,9 +778,12 @@ impl MenuSystem {
 
         // Get detailed series info with episodes
         let series_info = api.get_series_info(series_id).await?;
-        
-        debug!("Series info parsed: {} seasons, episodes present: {}", 
-               series_info.seasons.len(), series_info.episodes.is_some());
+
+        debug!(
+            "Series info parsed: {} seasons, episodes present: {}",
+            series_info.seasons.len(),
+            series_info.episodes.is_some()
+        );
 
         // Display series info
         let series_name = if let Some(ref info) = series_info.info {
@@ -812,11 +819,15 @@ impl MenuSystem {
         let mut last_selected_season = 0;
         loop {
             // Create season options from API response
-            let season_options: Vec<String> = series_info.seasons
+            let season_options: Vec<String> = series_info
+                .seasons
                 .iter()
                 .map(|season| {
                     let episode_count = season.episode_count.parse::<u32>().unwrap_or(0);
-                    format!("Season {} - {} ({} episodes)", season.season_number, season.name, episode_count)
+                    format!(
+                        "Season {} - {} ({} episodes)",
+                        season.season_number, season.name, episode_count
+                    )
                 })
                 .collect();
 
@@ -839,18 +850,24 @@ impl MenuSystem {
                     }
 
                     // Find selected season index
-                    if let Some(season_index) = season_options.iter().position(|opt| *opt == selection) {
+                    if let Some(season_index) =
+                        season_options.iter().position(|opt| *opt == selection)
+                    {
                         last_selected_season = season_index;
                         let selected_api_season = &series_info.seasons[season_index];
-                        
+
                         // Convert API season to internal format
                         let episodes = if let Some(ref episodes_map) = series_info.episodes {
                             // Try to get episodes by season number
                             let season_key = &selected_api_season.season_number.to_string();
                             debug!("Looking for episodes in season key: {}", season_key);
-                            debug!("Available episode keys: {:?}", episodes_map.keys().collect::<Vec<_>>());
-                            
-                            episodes_map.get(season_key)
+                            debug!(
+                                "Available episode keys: {:?}",
+                                episodes_map.keys().collect::<Vec<_>>()
+                            );
+
+                            episodes_map
+                                .get(season_key)
                                 .unwrap_or(&Vec::new())
                                 .iter()
                                 .map(|api_ep| Episode {
@@ -869,13 +886,13 @@ impl MenuSystem {
                             debug!("No episodes map in response, might need separate API call");
                             Vec::new()
                         };
-                        
+
                         let season = Season {
                             season_number: selected_api_season.season_number,
                             name: Some(selected_api_season.name.clone()),
                             episodes,
                         };
-                        
+
                         // Browse episodes in this season
                         self.browse_season_episodes(&season, series_name).await?;
                     }
@@ -887,7 +904,11 @@ impl MenuSystem {
         Ok(())
     }
 
-    async fn browse_season_episodes(&mut self, season: &crate::xtream_api::Season, series_name: &str) -> Result<()> {
+    async fn browse_season_episodes(
+        &mut self,
+        season: &crate::xtream_api::Season,
+        series_name: &str,
+    ) -> Result<()> {
         let mut last_selected_episode = 0;
 
         loop {
@@ -910,7 +931,10 @@ impl MenuSystem {
                         String::new()
                     };
 
-                    format!("Episode {} - {}{}", episode.episode_num, episode.title, duration_info)
+                    format!(
+                        "Episode {} - {}{}",
+                        episode.episode_num, episode.title, duration_info
+                    )
                 })
                 .collect();
 
@@ -936,12 +960,9 @@ impl MenuSystem {
             };
 
             let prompt_text = format!("{} - {} Episodes:", series_name, season_name);
-            let select = Select::new(
-                &prompt_text,
-                episode_options_with_back
-            )
-            .with_page_size(self.page_size)
-            .with_starting_cursor(last_selected_episode);
+            let select = Select::new(&prompt_text, episode_options_with_back)
+                .with_page_size(self.page_size)
+                .with_starting_cursor(last_selected_episode);
 
             match select.prompt_skippable()? {
                 Some(selection) => {
@@ -950,12 +971,15 @@ impl MenuSystem {
                     }
 
                     // Find selected episode index
-                    if let Some(episode_index) = episode_options.iter().position(|opt| *opt == selection) {
+                    if let Some(episode_index) =
+                        episode_options.iter().position(|opt| *opt == selection)
+                    {
                         last_selected_episode = episode_index;
                         let selected_episode = &season.episodes[episode_index];
 
                         // Show episode details and play option
-                        self.handle_episode_selection(selected_episode, series_name).await?;
+                        self.handle_episode_selection(selected_episode, series_name)
+                            .await?;
                     }
                 }
                 None => break,
@@ -965,11 +989,18 @@ impl MenuSystem {
         Ok(())
     }
 
-    async fn handle_episode_selection(&mut self, episode: &crate::xtream_api::Episode, series_name: &str) -> Result<()> {
+    async fn handle_episode_selection(
+        &mut self,
+        episode: &crate::xtream_api::Episode,
+        series_name: &str,
+    ) -> Result<()> {
         // Display episode details
-        println!("\n=== {} - Episode {} ===", series_name, episode.episode_num);
+        println!(
+            "\n=== {} - Episode {} ===",
+            series_name, episode.episode_num
+        );
         println!("Title: {}", episode.title);
-        
+
         if let Some(ref info) = episode.info {
             if let Some(ref plot) = info.plot {
                 println!("Plot: {}", plot);
@@ -1003,9 +1034,10 @@ impl MenuSystem {
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
 
-            let stream_url = api.get_episode_stream_url(&episode.id, episode.container_extension.as_deref());
+            let stream_url =
+                api.get_episode_stream_url(&episode.id, episode.container_extension.as_deref());
             println!("Playing: {} - Episode {}", series_name, episode.episode_num);
-            
+
             self.player.play(&stream_url)?;
         }
         // Back - do nothing
@@ -1044,7 +1076,10 @@ impl MenuSystem {
                 // Fallback to basic streaming without VOD info
                 let url = api.get_stream_url(stream_id, "movie", None);
                 println!("Playing: {}", stream_name);
-                return self.player.play(&url).map_err(|e| anyhow::anyhow!("Playback error: {}", e));
+                return self
+                    .player
+                    .play(&url)
+                    .map_err(|e| anyhow::anyhow!("Playback error: {}", e));
             }
         };
 
@@ -1055,21 +1090,21 @@ impl MenuSystem {
 
         // Display movie information
         println!("\n=== {} ===", vod_info.info.name);
-        
+
         if let Some(ref plot) = vod_info.info.plot {
             println!("Description:");
             Self::print_wrapped(plot, terminal_width);
             println!();
         }
-        
+
         if let Some(ref genre) = vod_info.info.genre {
             println!("Genre: {}", genre);
         }
-        
+
         if let Some(ref release_date) = vod_info.info.releasedate {
             println!("Release Date: {}", release_date);
         }
-        
+
         if let Some(ref duration_value) = vod_info.info.duration_secs {
             // Try to parse duration_secs from various formats
             let duration_opt = match duration_value {
@@ -1077,7 +1112,7 @@ impl MenuSystem {
                 serde_json::Value::String(s) => s.parse::<u32>().ok(),
                 _ => None,
             };
-            
+
             if let Some(duration) = duration_opt {
                 let hours = duration / 3600;
                 let minutes = (duration % 3600) / 60;
@@ -1092,24 +1127,27 @@ impl MenuSystem {
         } else if let Some(ref duration) = vod_info.info.duration {
             println!("Duration: {}", duration);
         }
-        
+
         println!();
 
         // Show play confirmation
         let actions = vec!["▶ Play Movie", "⬅ Back"];
-        let action_selection = Select::new(
-            &format!("Action for '{}':", vod_info.info.name),
-            actions,
-        )
-        .prompt_skippable()?;
+        let action_selection =
+            Select::new(&format!("Action for '{}':", vod_info.info.name), actions)
+                .prompt_skippable()?;
 
         if let Some("▶ Play Movie") = action_selection {
             // Use the container extension from VOD info
             let extension = Some(vod_info.movie_data.container_extension.as_str());
             let url = api.get_stream_url(stream_id, "movie", extension);
-            
-            println!("Playing: {} ({})", vod_info.info.name, vod_info.movie_data.container_extension);
-            self.player.play(&url).map_err(|e| anyhow::anyhow!("Playback error: {}", e))?;
+
+            println!(
+                "Playing: {} ({})",
+                vod_info.info.name, vod_info.movie_data.container_extension
+            );
+            self.player
+                .play(&url)
+                .map_err(|e| anyhow::anyhow!("Playback error: {}", e))?;
         }
 
         Ok(())
@@ -1118,10 +1156,10 @@ impl MenuSystem {
     fn print_wrapped(text: &str, width: usize) {
         let indent = "  ";
         let effective_width = width.saturating_sub(indent.len());
-        
+
         let words: Vec<&str> = text.split_whitespace().collect();
         let mut current_line = String::new();
-        
+
         for word in words {
             if current_line.is_empty() {
                 current_line = word.to_string();
@@ -1133,7 +1171,7 @@ impl MenuSystem {
                 current_line = word.to_string();
             }
         }
-        
+
         if !current_line.is_empty() {
             println!("{}{}", indent, current_line);
         }

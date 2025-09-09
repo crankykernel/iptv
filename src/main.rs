@@ -302,7 +302,8 @@ async fn main() -> Result<()> {
                 iptv::tui::run_tui(config.providers, player).await?;
             } else {
                 // Initialize and run menu system
-                let mut menu_system = MenuSystem::new(config.providers, player, config.ui.page_size);
+                let mut menu_system =
+                    MenuSystem::new(config.providers, player, config.ui.page_size);
                 menu_system.run().await?;
             }
         }

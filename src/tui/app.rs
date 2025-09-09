@@ -62,11 +62,7 @@ impl App {
         let items = if providers.len() > 1 {
             providers
                 .iter()
-                .map(|p| {
-                    p.name
-                        .clone()
-                        .unwrap_or_else(|| p.url.clone())
-                })
+                .map(|p| p.name.clone().unwrap_or_else(|| p.url.clone()))
                 .collect()
         } else {
             vec![]
@@ -128,69 +124,63 @@ impl App {
                     self.update_main_menu_items();
                 }
             }
-            AppState::ProviderSelection => {
-                match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
-                    KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
-                    KeyCode::PageUp => self.move_selection_page_up(),
-                    KeyCode::PageDown => self.move_selection_page_down(),
-                    KeyCode::Home => self.move_selection_home(),
-                    KeyCode::End => self.move_selection_end(),
-                    KeyCode::Enter => {
-                        if self.selected_index < self.providers.len() {
-                            let provider = self.providers[self.selected_index].clone();
-                            self.connect_to_provider(&provider).await;
-                        }
+            AppState::ProviderSelection => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
+                KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                KeyCode::PageUp => self.move_selection_page_up(),
+                KeyCode::PageDown => self.move_selection_page_down(),
+                KeyCode::Home => self.move_selection_home(),
+                KeyCode::End => self.move_selection_end(),
+                KeyCode::Enter => {
+                    if self.selected_index < self.providers.len() {
+                        let provider = self.providers[self.selected_index].clone();
+                        self.connect_to_provider(&provider).await;
                     }
-                    KeyCode::Esc => return Some(Action::Quit),
-                    _ => {}
                 }
-            }
-            AppState::MainMenu => {
-                match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
-                    KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
-                    KeyCode::PageUp => self.move_selection_page_up(),
-                    KeyCode::PageDown => self.move_selection_page_down(),
-                    KeyCode::Home => self.move_selection_home(),
-                    KeyCode::End => self.move_selection_end(),
-                    KeyCode::Enter => {
-                        self.handle_main_menu_selection().await;
-                    }
-                    KeyCode::Esc | KeyCode::Char('b') => {
-                        if self.providers.len() > 1 {
-                            self.state = AppState::ProviderSelection;
-                            self.selected_index = 0;
-                            self.update_provider_items();
-                        } else {
-                            return Some(Action::Quit);
-                        }
-                    }
-                    _ => {}
+                KeyCode::Esc => return Some(Action::Quit),
+                _ => {}
+            },
+            AppState::MainMenu => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
+                KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                KeyCode::PageUp => self.move_selection_page_up(),
+                KeyCode::PageDown => self.move_selection_page_down(),
+                KeyCode::Home => self.move_selection_home(),
+                KeyCode::End => self.move_selection_end(),
+                KeyCode::Enter => {
+                    self.handle_main_menu_selection().await;
                 }
-            }
-            AppState::CategorySelection(content_type) => {
-                match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
-                    KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
-                    KeyCode::PageUp => self.move_selection_page_up(),
-                    KeyCode::PageDown => self.move_selection_page_down(),
-                    KeyCode::Home => self.move_selection_home(),
-                    KeyCode::End => self.move_selection_end(),
-                    KeyCode::Enter => {
-                        if self.selected_index < self.categories.len() {
-                            let category = self.categories[self.selected_index].clone();
-                            self.load_streams(content_type.clone(), category).await;
-                        }
-                    }
-                    KeyCode::Esc | KeyCode::Char('b') => {
-                        self.state = AppState::MainMenu;
+                KeyCode::Esc | KeyCode::Char('b') => {
+                    if self.providers.len() > 1 {
+                        self.state = AppState::ProviderSelection;
                         self.selected_index = 0;
-                        self.update_main_menu_items();
+                        self.update_provider_items();
+                    } else {
+                        return Some(Action::Quit);
                     }
-                    _ => {}
                 }
-            }
+                _ => {}
+            },
+            AppState::CategorySelection(content_type) => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
+                KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                KeyCode::PageUp => self.move_selection_page_up(),
+                KeyCode::PageDown => self.move_selection_page_down(),
+                KeyCode::Home => self.move_selection_home(),
+                KeyCode::End => self.move_selection_end(),
+                KeyCode::Enter => {
+                    if self.selected_index < self.categories.len() {
+                        let category = self.categories[self.selected_index].clone();
+                        self.load_streams(content_type.clone(), category).await;
+                    }
+                }
+                KeyCode::Esc | KeyCode::Char('b') => {
+                    self.state = AppState::MainMenu;
+                    self.selected_index = 0;
+                    self.update_main_menu_items();
+                }
+                _ => {}
+            },
             AppState::StreamSelection(content_type, _category) => {
                 match key.code {
                     KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
@@ -220,87 +210,82 @@ impl App {
                     _ => {}
                 }
             }
-            AppState::SeasonSelection(series) => {
-                match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
-                    KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
-                    KeyCode::PageUp => self.move_selection_page_up(),
-                    KeyCode::PageDown => self.move_selection_page_down(),
-                    KeyCode::Home => self.move_selection_home(),
-                    KeyCode::End => self.move_selection_end(),
-                    KeyCode::Enter => {
-                        if self.selected_index < self.seasons.len() {
-                            let season = &self.seasons[self.selected_index];
-                            self.load_episodes(series.clone(), season.clone()).await;
-                        }
+            AppState::SeasonSelection(series) => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
+                KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                KeyCode::PageUp => self.move_selection_page_up(),
+                KeyCode::PageDown => self.move_selection_page_down(),
+                KeyCode::Home => self.move_selection_home(),
+                KeyCode::End => self.move_selection_end(),
+                KeyCode::Enter => {
+                    if self.selected_index < self.seasons.len() {
+                        let season = &self.seasons[self.selected_index];
+                        self.load_episodes(series.clone(), season.clone()).await;
                     }
-                    KeyCode::Esc | KeyCode::Char('b') => {
-                        if let Some(category) = self.categories.iter().find(|c| 
-                            self.streams.iter().any(|s| s.category_id == Some(c.category_id.clone()))
-                        ) {
-                            self.state = AppState::StreamSelection(ContentType::Series, category.clone());
-                            self.selected_index = 0;
-                        }
-                    }
-                    _ => {}
                 }
-            }
-            AppState::EpisodeSelection(series, _season) => {
-                match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
-                    KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
-                    KeyCode::PageUp => self.move_selection_page_up(),
-                    KeyCode::PageDown => self.move_selection_page_down(),
-                    KeyCode::Home => self.move_selection_home(),
-                    KeyCode::End => self.move_selection_end(),
-                    KeyCode::Enter => {
-                        if self.selected_index < self.episodes.len() {
-                            let episode = self.episodes[self.selected_index].clone();
-                            self.play_episode(&episode).await;
-                        }
-                    }
-                    KeyCode::Esc | KeyCode::Char('b') => {
-                        self.state = AppState::SeasonSelection(series.clone());
+                KeyCode::Esc | KeyCode::Char('b') => {
+                    if let Some(category) = self.categories.iter().find(|c| {
+                        self.streams
+                            .iter()
+                            .any(|s| s.category_id == Some(c.category_id.clone()))
+                    }) {
+                        self.state =
+                            AppState::StreamSelection(ContentType::Series, category.clone());
                         self.selected_index = 0;
                     }
-                    _ => {}
                 }
-            }
-            AppState::FavouriteSelection => {
-                match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
-                    KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
-                    KeyCode::PageUp => self.move_selection_page_up(),
-                    KeyCode::PageDown => self.move_selection_page_down(),
-                    KeyCode::Home => self.move_selection_home(),
-                    KeyCode::End => self.move_selection_end(),
-                    KeyCode::Char('f') => {
-                        if self.selected_index < self.favourites.len() {
-                            self.remove_favourite(self.selected_index).await;
-                        }
+                _ => {}
+            },
+            AppState::EpisodeSelection(series, _season) => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
+                KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                KeyCode::PageUp => self.move_selection_page_up(),
+                KeyCode::PageDown => self.move_selection_page_down(),
+                KeyCode::Home => self.move_selection_home(),
+                KeyCode::End => self.move_selection_end(),
+                KeyCode::Enter => {
+                    if self.selected_index < self.episodes.len() {
+                        let episode = self.episodes[self.selected_index].clone();
+                        self.play_episode(&episode).await;
                     }
-                    KeyCode::Enter => {
-                        if self.selected_index < self.favourites.len() {
-                            let fav = self.favourites[self.selected_index].clone();
-                            self.play_favourite(&fav).await;
-                        }
-                    }
-                    KeyCode::Esc | KeyCode::Char('b') => {
-                        self.state = AppState::MainMenu;
-                        self.selected_index = 0;
-                        self.update_main_menu_items();
-                    }
-                    _ => {}
                 }
-            }
-            AppState::Playing(_name) => {
-                match key.code {
-                    KeyCode::Esc | KeyCode::Char('s') => {
-                        self.stop_playing();
-                    }
-                    _ => {}
+                KeyCode::Esc | KeyCode::Char('b') => {
+                    self.state = AppState::SeasonSelection(series.clone());
+                    self.selected_index = 0;
                 }
-            }
+                _ => {}
+            },
+            AppState::FavouriteSelection => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
+                KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                KeyCode::PageUp => self.move_selection_page_up(),
+                KeyCode::PageDown => self.move_selection_page_down(),
+                KeyCode::Home => self.move_selection_home(),
+                KeyCode::End => self.move_selection_end(),
+                KeyCode::Char('f') => {
+                    if self.selected_index < self.favourites.len() {
+                        self.remove_favourite(self.selected_index).await;
+                    }
+                }
+                KeyCode::Enter => {
+                    if self.selected_index < self.favourites.len() {
+                        let fav = self.favourites[self.selected_index].clone();
+                        self.play_favourite(&fav).await;
+                    }
+                }
+                KeyCode::Esc | KeyCode::Char('b') => {
+                    self.state = AppState::MainMenu;
+                    self.selected_index = 0;
+                    self.update_main_menu_items();
+                }
+                _ => {}
+            },
+            AppState::Playing(_name) => match key.code {
+                KeyCode::Esc | KeyCode::Char('s') => {
+                    self.stop_playing();
+                }
+                _ => {}
+            },
             _ => {}
         }
 
@@ -326,7 +311,7 @@ impl App {
             }
         }
     }
-    
+
     fn move_selection_page_up(&mut self) {
         let page_size = 10; // Move 10 items at a time
         if self.selected_index > 0 {
@@ -336,7 +321,7 @@ impl App {
             }
         }
     }
-    
+
     fn move_selection_page_down(&mut self) {
         let page_size = 10; // Move 10 items at a time
         let max_index = self.items.len().saturating_sub(1);
@@ -348,12 +333,12 @@ impl App {
             }
         }
     }
-    
+
     fn move_selection_home(&mut self) {
         self.selected_index = 0;
         self.scroll_offset = 0;
     }
-    
+
     fn move_selection_end(&mut self) {
         if !self.items.is_empty() {
             self.selected_index = self.items.len() - 1;
@@ -367,11 +352,15 @@ impl App {
     }
 
     async fn connect_to_provider(&mut self, provider: &ProviderConfig) {
-        self.state = AppState::Loading(format!("Connecting to {}...", 
-            provider.name.as_ref().unwrap_or(&provider.url)));
-        
-        self.add_log(format!("Connecting to provider: {}", 
-            provider.name.as_ref().unwrap_or(&provider.url)));
+        self.state = AppState::Loading(format!(
+            "Connecting to {}...",
+            provider.name.as_ref().unwrap_or(&provider.url)
+        ));
+
+        self.add_log(format!(
+            "Connecting to provider: {}",
+            provider.name.as_ref().unwrap_or(&provider.url)
+        ));
 
         match XTreamAPI::new(
             provider.url.clone(),
@@ -394,7 +383,8 @@ impl App {
     }
 
     fn update_provider_items(&mut self) {
-        self.items = self.providers
+        self.items = self
+            .providers
             .iter()
             .map(|p| p.name.clone().unwrap_or_else(|| p.url.clone()))
             .collect();
@@ -426,9 +416,8 @@ impl App {
     async fn load_categories(&mut self, content_type: ContentType) {
         self.state = AppState::Loading(format!("Loading {} categories...", content_type));
         self.add_log(format!("Loading {} categories", content_type));
-        
-        if let Some(api) = &mut self.current_api {
 
+        if let Some(api) = &mut self.current_api {
             let result = match content_type {
                 ContentType::Live => api.get_live_categories().await,
                 ContentType::Movies => api.get_vod_categories().await,
@@ -438,7 +427,8 @@ impl App {
             match result {
                 Ok(categories) => {
                     self.categories = categories;
-                    self.items = self.categories
+                    self.items = self
+                        .categories
                         .iter()
                         .map(|c| c.category_name.clone())
                         .collect();
@@ -456,45 +446,53 @@ impl App {
     }
 
     async fn load_streams(&mut self, content_type: ContentType, category: Category) {
-        self.state = AppState::Loading(format!("Loading streams from {}...", category.category_name));
-        self.add_log(format!("Loading streams from category: {}", category.category_name));
-        
-        if let Some(api) = &mut self.current_api {
+        self.state = AppState::Loading(format!(
+            "Loading streams from {}...",
+            category.category_name
+        ));
+        self.add_log(format!(
+            "Loading streams from category: {}",
+            category.category_name
+        ));
 
+        if let Some(api) = &mut self.current_api {
             let result = match content_type {
                 ContentType::Live => api.get_live_streams(Some(&category.category_id)).await,
                 ContentType::Movies => api.get_vod_streams(Some(&category.category_id)).await,
-                ContentType::Series => api.get_series(Some(&category.category_id)).await
-                    .map(|series_infos| series_infos.into_iter()
-                        .map(|info| Stream {
-                            num: info.num,
-                            name: info.name.clone(),
-                            stream_type: "series".to_string(),
-                            stream_id: info.series_id,
-                            stream_icon: info.cover.clone(),
-                            epg_channel_id: None,
-                            added: None,
-                            category_id: info.category_id.clone(),
-                            category_ids: None,
-                            custom_sid: None,
-                            tv_archive: None,
-                            direct_source: None,
-                            tv_archive_duration: None,
-                            is_adult: None,
-                            container_extension: None,
-                            rating: None,
-                            rating_5based: None,
+                ContentType::Series => {
+                    api.get_series(Some(&category.category_id))
+                        .await
+                        .map(|series_infos| {
+                            series_infos
+                                .into_iter()
+                                .map(|info| Stream {
+                                    num: info.num,
+                                    name: info.name.clone(),
+                                    stream_type: "series".to_string(),
+                                    stream_id: info.series_id,
+                                    stream_icon: info.cover.clone(),
+                                    epg_channel_id: None,
+                                    added: None,
+                                    category_id: info.category_id.clone(),
+                                    category_ids: None,
+                                    custom_sid: None,
+                                    tv_archive: None,
+                                    direct_source: None,
+                                    tv_archive_duration: None,
+                                    is_adult: None,
+                                    container_extension: None,
+                                    rating: None,
+                                    rating_5based: None,
+                                })
+                                .collect()
                         })
-                        .collect()),
+                }
             };
 
             match result {
                 Ok(streams) => {
                     self.streams = streams;
-                    self.items = self.streams
-                        .iter()
-                        .map(|s| s.name.clone())
-                        .collect();
+                    self.items = self.streams.iter().map(|s| s.name.clone()).collect();
                     self.state = AppState::StreamSelection(content_type, category);
                     self.selected_index = 0;
                     self.scroll_offset = 0;
@@ -511,28 +509,32 @@ impl App {
     async fn load_seasons(&mut self, series: Stream) {
         self.state = AppState::Loading(format!("Loading seasons for {}...", series.name));
         self.add_log(format!("Loading seasons for: {}", series.name));
-        
-        if let Some(api) = &mut self.current_api {
 
+        if let Some(api) = &mut self.current_api {
             match api.get_series_info(series.stream_id).await {
                 Ok(info) => {
                     if let Some(episodes) = &info.episodes {
-                        self.seasons = episodes.keys()
+                        self.seasons = episodes
+                            .keys()
                             .map(|season_num| TuiSeason {
                                 season_number: season_num.parse().unwrap_or(0),
                                 name: format!("Season {}", season_num),
-                                episode_count: episodes.get(season_num).map(|eps| eps.len()).unwrap_or(0),
+                                episode_count: episodes
+                                    .get(season_num)
+                                    .map(|eps| eps.len())
+                                    .unwrap_or(0),
                             })
                             .collect();
                     } else {
                         self.seasons = Vec::new();
                     }
-                    
-                    self.items = self.seasons
+
+                    self.items = self
+                        .seasons
                         .iter()
                         .map(|s| format!("{} ({} episodes)", s.name, s.episode_count))
                         .collect();
-                    
+
                     self.state = AppState::SeasonSelection(series);
                     self.selected_index = 0;
                     self.scroll_offset = 0;
@@ -548,26 +550,31 @@ impl App {
 
     async fn load_episodes(&mut self, series: Stream, season: TuiSeason) {
         self.state = AppState::Loading(format!("Loading episodes for {}...", season.name));
-        self.add_log(format!("Loading episodes for {} - {}", series.name, season.name));
-        
-        if let Some(api) = &mut self.current_api {
+        self.add_log(format!(
+            "Loading episodes for {} - {}",
+            series.name, season.name
+        ));
 
+        if let Some(api) = &mut self.current_api {
             match api.get_series_info(series.stream_id).await {
                 Ok(info) => {
                     if let Some(episodes_map) = &info.episodes {
-                        if let Some(episodes) = episodes_map.get(&season.season_number.to_string()) {
-                        self.episodes = episodes.clone();
-                        self.items = self.episodes
-                            .iter()
-                            .map(|e| format!("Episode {}: {}", e.episode_num, e.title))
-                            .collect();
-                        
+                        if let Some(episodes) = episodes_map.get(&season.season_number.to_string())
+                        {
+                            self.episodes = episodes.clone();
+                            self.items = self
+                                .episodes
+                                .iter()
+                                .map(|e| format!("Episode {}: {}", e.episode_num, e.title))
+                                .collect();
+
                             self.state = AppState::EpisodeSelection(series, season);
                             self.selected_index = 0;
                             self.scroll_offset = 0;
                             self.add_log(format!("Loaded {} episodes", self.episodes.len()));
                         } else {
-                            self.state = AppState::Error("No episodes found for this season".to_string());
+                            self.state =
+                                AppState::Error("No episodes found for this season".to_string());
                         }
                     } else {
                         self.state = AppState::Error("No episodes available".to_string());
@@ -584,17 +591,17 @@ impl App {
     async fn load_favourites(&mut self) {
         self.state = AppState::Loading("Loading favourites...".to_string());
         self.add_log("Loading favourites".to_string());
-        
-        if let Some(api) = &mut self.current_api {
 
+        if let Some(api) = &mut self.current_api {
             match api.cache_manager.get_favourites(&api.provider_hash).await {
                 Ok(favs) => {
                     self.favourites = favs;
-                    self.items = self.favourites
+                    self.items = self
+                        .favourites
                         .iter()
                         .map(|f| format!("[{}] {}", f.stream_type, f.name))
                         .collect();
-                    
+
                     self.state = AppState::FavouriteSelection;
                     self.selected_index = 0;
                     self.scroll_offset = 0;
@@ -614,12 +621,15 @@ impl App {
         if index < self.favourites.len() {
             if let Some(api) = &self.current_api {
                 let fav = &self.favourites[index];
-                let _ = api.cache_manager.remove_favourite(&api.provider_hash, fav.stream_id, &fav.stream_type).await;
+                let _ = api
+                    .cache_manager
+                    .remove_favourite(&api.provider_hash, fav.stream_id, &fav.stream_type)
+                    .await;
                 self.add_log(format!("Removed {} from favourites", fav.name));
-                
+
                 self.favourites.remove(index);
                 self.items.remove(index);
-                
+
                 if self.selected_index >= self.items.len() && self.selected_index > 0 {
                     self.selected_index -= 1;
                 }
@@ -630,15 +640,18 @@ impl App {
     async fn play_stream(&mut self, stream: &Stream) {
         self.state = AppState::Playing(stream.name.clone());
         self.add_log(format!("Playing: {}", stream.name));
-        
+
         if let Some(api) = &self.current_api {
-            
             let url = api.get_stream_url(
                 stream.stream_id,
-                if stream.stream_type == "live" { "live" } else { "movie" },
+                if stream.stream_type == "live" {
+                    "live"
+                } else {
+                    "movie"
+                },
                 stream.container_extension.as_deref(),
             );
-            
+
             // Use TUI-specific play method that runs in background
             if let Err(e) = self.player.play_tui(&url).await {
                 self.state = AppState::Error(format!("Failed to play stream: {}", e));
@@ -653,15 +666,14 @@ impl App {
     async fn play_episode(&mut self, episode: &ApiEpisode) {
         self.state = AppState::Playing(episode.title.clone());
         self.add_log(format!("Playing: {}", episode.title));
-        
+
         if let Some(api) = &self.current_api {
-            
             let url = api.get_stream_url(
                 episode.id.parse().unwrap_or(0),
                 "series",
                 episode.container_extension.as_deref(),
             );
-            
+
             // Use TUI-specific play method that runs in background
             if let Err(e) = self.player.play_tui(&url).await {
                 self.state = AppState::Error(format!("Failed to play episode: {}", e));
@@ -676,16 +688,11 @@ impl App {
     async fn play_favourite(&mut self, fav: &FavouriteStream) {
         self.state = AppState::Playing(fav.name.clone());
         self.add_log(format!("Playing favourite: {}", fav.name));
-        
+
         if let Some(api) = &self.current_api {
-            
             // Construct the stream URL from the favourite stream ID
-            let url = api.get_stream_url(
-                fav.stream_id,
-                &fav.stream_type,
-                None,
-            );
-            
+            let url = api.get_stream_url(fav.stream_id, &fav.stream_type, None);
+
             // Use TUI-specific play method that runs in background
             if let Err(e) = self.player.play_tui(&url).await {
                 self.state = AppState::Error(format!("Failed to play favourite: {}", e));
@@ -703,7 +710,7 @@ impl App {
         tokio::spawn(async move {
             let _ = player.stop_tui().await;
         });
-        
+
         self.state = AppState::MainMenu;
         self.selected_index = 0;
         self.update_main_menu_items();
@@ -716,10 +723,10 @@ impl App {
         } else {
             return;
         };
-        
+
         self.state = AppState::Loading("Refreshing cache...".to_string());
         self.add_log("Refreshing cache".to_string());
-        
+
         if let Some(api) = &self.current_api {
             if let Err(e) = api.cache_manager.clear_provider_cache(&provider_hash).await {
                 self.state = AppState::Error(format!("Failed to refresh cache: {}", e));
@@ -735,7 +742,7 @@ impl App {
     async fn clear_cache(&mut self) {
         self.state = AppState::Loading("Clearing cache...".to_string());
         self.add_log("Clearing all cache".to_string());
-        
+
         if let Some(api) = &self.current_api {
             if let Err(e) = api.cache_manager.clear_all_cache().await {
                 self.state = AppState::Error(format!("Failed to clear cache: {}", e));

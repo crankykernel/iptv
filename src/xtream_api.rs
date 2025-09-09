@@ -61,7 +61,9 @@ where
     }
 }
 
-fn deserialize_optional_number_as_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+fn deserialize_optional_number_as_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -608,10 +610,7 @@ impl XTreamAPI {
         let response: UserInfoResponse = self.make_request("get_user_info", None).await?;
         let user_info = response.user_info;
 
-        let metadata = CacheMetadata::new(
-            self.base_url.clone(),
-            self.provider_name.clone(),
-        );
+        let metadata = CacheMetadata::new(self.base_url.clone(), self.provider_name.clone());
 
         if let Err(e) = self
             .cache_manager
@@ -641,10 +640,7 @@ impl XTreamAPI {
 
         let categories: Vec<Category> = self.make_request("get_live_categories", None).await?;
 
-        let metadata = CacheMetadata::new(
-            self.base_url.clone(),
-            self.provider_name.clone(),
-        );
+        let metadata = CacheMetadata::new(self.base_url.clone(), self.provider_name.clone());
 
         if let Err(e) = self
             .cache_manager
@@ -674,10 +670,7 @@ impl XTreamAPI {
 
         let categories: Vec<Category> = self.make_request("get_vod_categories", None).await?;
 
-        let metadata = CacheMetadata::new(
-            self.base_url.clone(),
-            self.provider_name.clone(),
-        );
+        let metadata = CacheMetadata::new(self.base_url.clone(), self.provider_name.clone());
 
         if let Err(e) = self
             .cache_manager
@@ -707,10 +700,7 @@ impl XTreamAPI {
 
         let categories: Vec<Category> = self.make_request("get_series_categories", None).await?;
 
-        let metadata = CacheMetadata::new(
-            self.base_url.clone(),
-            self.provider_name.clone(),
-        );
+        let metadata = CacheMetadata::new(self.base_url.clone(), self.provider_name.clone());
 
         if let Err(e) = self
             .cache_manager
@@ -737,30 +727,27 @@ impl XTreamAPI {
             .await
         {
             let filtered_streams = if let Some(cat_id) = category_id {
-                    cached
-                        .data
-                        .into_iter()
-                        .filter(|stream| {
-                            stream
-                                .category_id
-                                .as_ref()
-                                .map(|id| id == cat_id)
-                                .unwrap_or(false)
-                        })
-                        .collect()
-                } else {
-                    cached.data
-                };
-                return Ok(filtered_streams);
+                cached
+                    .data
+                    .into_iter()
+                    .filter(|stream| {
+                        stream
+                            .category_id
+                            .as_ref()
+                            .map(|id| id == cat_id)
+                            .unwrap_or(false)
+                    })
+                    .collect()
+            } else {
+                cached.data
+            };
+            return Ok(filtered_streams);
         }
 
         // If All cache is expired or missing, fetch fresh data
         let streams: Vec<Stream> = self.make_request("get_live_streams", None).await?;
 
-        let metadata = CacheMetadata::new(
-            self.base_url.clone(),
-            self.provider_name.clone(),
-        );
+        let metadata = CacheMetadata::new(self.base_url.clone(), self.provider_name.clone());
 
         // Always cache the full "All" response
         if let Err(e) = self
@@ -804,30 +791,27 @@ impl XTreamAPI {
             .await
         {
             let filtered_streams = if let Some(cat_id) = category_id {
-                    cached
-                        .data
-                        .into_iter()
-                        .filter(|stream| {
-                            stream
-                                .category_id
-                                .as_ref()
-                                .map(|id| id == cat_id)
-                                .unwrap_or(false)
-                        })
-                        .collect()
-                } else {
-                    cached.data
-                };
-                return Ok(filtered_streams);
+                cached
+                    .data
+                    .into_iter()
+                    .filter(|stream| {
+                        stream
+                            .category_id
+                            .as_ref()
+                            .map(|id| id == cat_id)
+                            .unwrap_or(false)
+                    })
+                    .collect()
+            } else {
+                cached.data
+            };
+            return Ok(filtered_streams);
         }
 
         // If All cache is expired or missing, fetch fresh data
         let streams: Vec<Stream> = self.make_request("get_vod_streams", None).await?;
 
-        let metadata = CacheMetadata::new(
-            self.base_url.clone(),
-            self.provider_name.clone(),
-        );
+        let metadata = CacheMetadata::new(self.base_url.clone(), self.provider_name.clone());
 
         // Always cache the full "All" response
         if let Err(e) = self
@@ -871,30 +855,27 @@ impl XTreamAPI {
             .await
         {
             let filtered_series = if let Some(cat_id) = category_id {
-                    cached
-                        .data
-                        .into_iter()
-                        .filter(|series| {
-                            series
-                                .category_id
-                                .as_ref()
-                                .map(|id| id == cat_id)
-                                .unwrap_or(false)
-                        })
-                        .collect()
-                } else {
-                    cached.data
-                };
-                return Ok(filtered_series);
+                cached
+                    .data
+                    .into_iter()
+                    .filter(|series| {
+                        series
+                            .category_id
+                            .as_ref()
+                            .map(|id| id == cat_id)
+                            .unwrap_or(false)
+                    })
+                    .collect()
+            } else {
+                cached.data
+            };
+            return Ok(filtered_series);
         }
 
         // If All cache is expired or missing, fetch fresh data
         let series: Vec<SeriesInfo> = self.make_request("get_series", None).await?;
 
-        let metadata = CacheMetadata::new(
-            self.base_url.clone(),
-            self.provider_name.clone(),
-        );
+        let metadata = CacheMetadata::new(self.base_url.clone(), self.provider_name.clone());
 
         // Always cache the full "All" response
         if let Err(e) = self
@@ -967,27 +948,35 @@ impl XTreamAPI {
         }
 
         // Log response for debugging
-        debug!("Series info response: {}", if response_text.len() > 1000 { 
-            format!("{}... (truncated, {} bytes total)", &response_text[..1000], response_text.len()) 
-        } else { 
-            response_text.clone() 
-        });
+        debug!(
+            "Series info response: {}",
+            if response_text.len() > 1000 {
+                format!(
+                    "{}... (truncated, {} bytes total)",
+                    &response_text[..1000],
+                    response_text.len()
+                )
+            } else {
+                response_text.clone()
+            }
+        );
 
-        let series_data: SeriesInfoResponse = serde_json::from_str(&response_text).map_err(|e| {
-            warn!("JSON parsing error for series info: {}", e);
-            warn!("Response content: {}", if response_text.len() > 200 { 
-                format!("{}... (truncated)", &response_text[..200]) 
-            } else { 
-                response_text.clone() 
-            });
-            anyhow::anyhow!("Failed to parse series info: {}", e)
-        })?;
+        let series_data: SeriesInfoResponse =
+            serde_json::from_str(&response_text).map_err(|e| {
+                warn!("JSON parsing error for series info: {}", e);
+                warn!(
+                    "Response content: {}",
+                    if response_text.len() > 200 {
+                        format!("{}... (truncated)", &response_text[..200])
+                    } else {
+                        response_text.clone()
+                    }
+                );
+                anyhow::anyhow!("Failed to parse series info: {}", e)
+            })?;
 
         // Cache the result
-        let metadata = CacheMetadata::new(
-            self.base_url.clone(),
-            self.provider_name.clone(),
-        );
+        let metadata = CacheMetadata::new(self.base_url.clone(), self.provider_name.clone());
 
         if let Err(e) = self
             .cache_manager
@@ -1043,27 +1032,34 @@ impl XTreamAPI {
         }
 
         // Log response for debugging
-        debug!("VOD info response: {}", if response_text.len() > 1000 { 
-            format!("{}... (truncated, {} bytes total)", &response_text[..1000], response_text.len()) 
-        } else { 
-            response_text.clone() 
-        });
+        debug!(
+            "VOD info response: {}",
+            if response_text.len() > 1000 {
+                format!(
+                    "{}... (truncated, {} bytes total)",
+                    &response_text[..1000],
+                    response_text.len()
+                )
+            } else {
+                response_text.clone()
+            }
+        );
 
         let vod_data: VodInfoResponse = serde_json::from_str(&response_text).map_err(|e| {
             warn!("JSON parsing error for VOD info: {}", e);
-            warn!("Response content: {}", if response_text.len() > 200 { 
-                format!("{}... (truncated)", &response_text[..200]) 
-            } else { 
-                response_text.clone() 
-            });
+            warn!(
+                "Response content: {}",
+                if response_text.len() > 200 {
+                    format!("{}... (truncated)", &response_text[..200])
+                } else {
+                    response_text.clone()
+                }
+            );
             anyhow::anyhow!("Failed to parse VOD info: {}", e)
         })?;
 
         // Cache the result
-        let metadata = CacheMetadata::new(
-            self.base_url.clone(),
-            self.provider_name.clone(),
-        );
+        let metadata = CacheMetadata::new(self.base_url.clone(), self.provider_name.clone());
 
         if let Err(e) = self
             .cache_manager

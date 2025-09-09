@@ -28,7 +28,6 @@ impl CacheMetadata {
             provider_name,
         }
     }
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
