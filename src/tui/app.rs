@@ -144,6 +144,10 @@ impl App {
                 match key.code {
                     KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
                     KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                    KeyCode::PageUp => self.move_selection_page_up(),
+                    KeyCode::PageDown => self.move_selection_page_down(),
+                    KeyCode::Home => self.move_selection_home(),
+                    KeyCode::End => self.move_selection_end(),
                     KeyCode::Enter => {
                         if self.selected_index < self.providers.len() {
                             let provider = self.providers[self.selected_index].clone();
@@ -158,6 +162,10 @@ impl App {
                 match key.code {
                     KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
                     KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                    KeyCode::PageUp => self.move_selection_page_up(),
+                    KeyCode::PageDown => self.move_selection_page_down(),
+                    KeyCode::Home => self.move_selection_home(),
+                    KeyCode::End => self.move_selection_end(),
                     KeyCode::Enter => {
                         self.handle_main_menu_selection().await;
                     }
@@ -177,6 +185,10 @@ impl App {
                 match key.code {
                     KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
                     KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                    KeyCode::PageUp => self.move_selection_page_up(),
+                    KeyCode::PageDown => self.move_selection_page_down(),
+                    KeyCode::Home => self.move_selection_home(),
+                    KeyCode::End => self.move_selection_end(),
                     KeyCode::Enter => {
                         if self.selected_index < self.categories.len() {
                             let category = self.categories[self.selected_index].clone();
@@ -195,6 +207,10 @@ impl App {
                 match key.code {
                     KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
                     KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                    KeyCode::PageUp => self.move_selection_page_up(),
+                    KeyCode::PageDown => self.move_selection_page_down(),
+                    KeyCode::Home => self.move_selection_home(),
+                    KeyCode::End => self.move_selection_end(),
                     // TODO: Add favourite toggling when available
                     KeyCode::Enter => {
                         if self.selected_index < self.streams.len() {
@@ -220,6 +236,10 @@ impl App {
                 match key.code {
                     KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
                     KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                    KeyCode::PageUp => self.move_selection_page_up(),
+                    KeyCode::PageDown => self.move_selection_page_down(),
+                    KeyCode::Home => self.move_selection_home(),
+                    KeyCode::End => self.move_selection_end(),
                     KeyCode::Enter => {
                         if self.selected_index < self.seasons.len() {
                             let season = &self.seasons[self.selected_index];
@@ -241,6 +261,10 @@ impl App {
                 match key.code {
                     KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
                     KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                    KeyCode::PageUp => self.move_selection_page_up(),
+                    KeyCode::PageDown => self.move_selection_page_down(),
+                    KeyCode::Home => self.move_selection_home(),
+                    KeyCode::End => self.move_selection_end(),
                     KeyCode::Enter => {
                         if self.selected_index < self.episodes.len() {
                             let episode = self.episodes[self.selected_index].clone();
@@ -258,6 +282,10 @@ impl App {
                 match key.code {
                     KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
                     KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                    KeyCode::PageUp => self.move_selection_page_up(),
+                    KeyCode::PageDown => self.move_selection_page_down(),
+                    KeyCode::Home => self.move_selection_home(),
+                    KeyCode::End => self.move_selection_end(),
                     KeyCode::Char('f') => {
                         if self.selected_index < self.favourites.len() {
                             self.remove_favourite(self.selected_index).await;
@@ -307,6 +335,45 @@ impl App {
             let visible_height = 20; // Adjust based on terminal height
             if self.selected_index >= self.scroll_offset + visible_height {
                 self.scroll_offset = self.selected_index - visible_height + 1;
+            }
+        }
+    }
+    
+    fn move_selection_page_up(&mut self) {
+        let page_size = 10; // Move 10 items at a time
+        if self.selected_index > 0 {
+            self.selected_index = self.selected_index.saturating_sub(page_size);
+            if self.selected_index < self.scroll_offset {
+                self.scroll_offset = self.selected_index;
+            }
+        }
+    }
+    
+    fn move_selection_page_down(&mut self) {
+        let page_size = 10; // Move 10 items at a time
+        let max_index = self.items.len().saturating_sub(1);
+        if self.selected_index < max_index {
+            self.selected_index = (self.selected_index + page_size).min(max_index);
+            let visible_height = 20;
+            if self.selected_index >= self.scroll_offset + visible_height {
+                self.scroll_offset = self.selected_index - visible_height + 1;
+            }
+        }
+    }
+    
+    fn move_selection_home(&mut self) {
+        self.selected_index = 0;
+        self.scroll_offset = 0;
+    }
+    
+    fn move_selection_end(&mut self) {
+        if !self.items.is_empty() {
+            self.selected_index = self.items.len() - 1;
+            let visible_height = 20;
+            if self.items.len() > visible_height {
+                self.scroll_offset = self.items.len() - visible_height;
+            } else {
+                self.scroll_offset = 0;
             }
         }
     }

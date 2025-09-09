@@ -257,10 +257,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let footer_text = if let Some(msg) = &app.status_message {
         msg.clone()
     } else {
-        format!(" Item {} of {} | ↑↓/jk: Navigate | Enter: Select | Esc/b: Back | q: Quit ",
-            app.selected_index + 1,
-            app.items.len().max(1)
-        )
+        " ↑↓/jk: Navigate | PgUp/PgDn: Fast scroll | Enter: Select | Esc/b: Back | ?: Help | q: Quit ".to_string()
     };
 
     let footer = Paragraph::new(footer_text)
