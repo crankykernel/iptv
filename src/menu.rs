@@ -1227,6 +1227,12 @@ impl MenuSystem {
             println!("Duration: {}", duration);
         }
 
+        // Display stream URL
+        let extension = Some(vod_info.movie_data.container_extension.as_str());
+        let stream_url = api.get_stream_url(stream_id, "movie", extension);
+        println!("Stream URL:");
+        Self::print_wrapped(&stream_url, terminal_width);
+
         println!();
 
         // Show play confirmation
@@ -1237,8 +1243,7 @@ impl MenuSystem {
 
         if let Some("▶ Play Movie") = action_selection {
             // Use the container extension from VOD info
-            let extension = Some(vod_info.movie_data.container_extension.as_str());
-            let url = api.get_stream_url(stream_id, "movie", extension);
+            let url = stream_url.clone();
 
             println!(
                 "Playing: {} ({})",

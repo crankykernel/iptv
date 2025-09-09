@@ -4,7 +4,9 @@
 use crate::config::ProviderConfig;
 use crate::menu::ContentType;
 use crate::player::Player;
-use crate::xtream_api::{ApiEpisode, Category, FavouriteStream, Stream, VodInfoResponse, XTreamAPI};
+use crate::xtream_api::{
+    ApiEpisode, Category, FavouriteStream, Stream, VodInfoResponse, XTreamAPI,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -274,23 +276,29 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
-                    self.state = AppState::CategorySelection(content_type.clone());
-                    self.selected_index = 0;
-                    self.scroll_offset = 0;
+                    // Go back to category selection and reload categories
+                    self.load_categories(content_type.clone()).await;
                 }
                 _ => {}
             },
             AppState::VodInfo(ref stream) => match key.code {
                 KeyCode::Up | KeyCode::Char('k') => {
                     // Navigate through menu items
-                    let menu_items: Vec<usize> = self.items.iter().enumerate()
-                        .filter(|(_, item)| item.contains("▶️  Play Movie") || 
-                                           item.contains("📋 Copy URL") || 
-                                           item.contains("⬅️  Back"))
+                    let menu_items: Vec<usize> = self
+                        .items
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, item)| {
+                            item.contains("▶️  Play Movie")
+                                || item.contains("📋 Copy URL")
+                                || item.contains("⬅️  Back")
+                        })
                         .map(|(i, _)| i)
                         .collect();
-                    
-                    if let Some(current_pos) = menu_items.iter().position(|&i| i == self.selected_index) {
+
+                    if let Some(current_pos) =
+                        menu_items.iter().position(|&i| i == self.selected_index)
+                    {
                         if current_pos > 0 {
                             self.selected_index = menu_items[current_pos - 1];
                         }
@@ -298,14 +306,21 @@ impl App {
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     // Navigate through menu items
-                    let menu_items: Vec<usize> = self.items.iter().enumerate()
-                        .filter(|(_, item)| item.contains("▶️  Play Movie") || 
-                                           item.contains("📋 Copy URL") || 
-                                           item.contains("⬅️  Back"))
+                    let menu_items: Vec<usize> = self
+                        .items
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, item)| {
+                            item.contains("▶️  Play Movie")
+                                || item.contains("📋 Copy URL")
+                                || item.contains("⬅️  Back")
+                        })
                         .map(|(i, _)| i)
                         .collect();
-                    
-                    if let Some(current_pos) = menu_items.iter().position(|&i| i == self.selected_index) {
+
+                    if let Some(current_pos) =
+                        menu_items.iter().position(|&i| i == self.selected_index)
+                    {
                         if current_pos < menu_items.len() - 1 {
                             self.selected_index = menu_items[current_pos + 1];
                         }
@@ -314,50 +329,58 @@ impl App {
                 KeyCode::Enter => {
                     // Execute selected menu action
                     let selected_item = &self.items[self.selected_index];
-                    
+
                     if selected_item.contains("▶️  Play Movie") {
                         self.play_vod_stream(&stream.clone()).await;
                     } else if selected_item.contains("📋 Copy URL") {
                         if let Some(api) = &self.current_api {
-                            let extension = self.vod_info.as_ref()
-                                .and_then(|info| Some(info.movie_data.container_extension.as_str()));
+                            let extension = self
+                                .vod_info
+                                .as_ref()
+                                .map(|info| info.movie_data.container_extension.as_str());
                             let url = api.get_stream_url(stream.stream_id, "movie", extension);
                             self.add_log(format!("Stream URL copied: {}", url));
                             self.status_message = Some("URL copied to logs!".to_string());
                         }
                     } else if selected_item.contains("⬅️  Back") {
-                        // Go back to stream selection
-                        if let Some(category) = self.categories.iter().find(|c| 
-                            stream.category_id.as_ref().map_or(false, |id| id == &c.category_id)
-                        ) {
-                            self.state = AppState::StreamSelection(ContentType::Movies, category.clone());
+                        // Go back to stream selection and reload streams
+                        let category = if let Some(cat) = self
+                            .categories
+                            .iter()
+                            .find(|c| stream.category_id.as_ref() == Some(&c.category_id))
+                        {
+                            cat.clone()
                         } else {
                             // Fallback to all movies
-                            self.state = AppState::StreamSelection(ContentType::Movies, Category {
+                            Category {
                                 category_id: "all".to_string(),
-                                category_name: "All".to_string(),  
+                                category_name: "All".to_string(),
                                 parent_id: None,
-                            });
-                        }
-                        self.selected_index = 0;
-                        self.scroll_offset = 0;
+                            }
+                        };
+
+                        // Reload the streams for this category
+                        self.load_streams(ContentType::Movies, category).await;
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
-                    // Quick back option
-                    if let Some(category) = self.categories.iter().find(|c| 
-                        stream.category_id.as_ref().map_or(false, |id| id == &c.category_id)
-                    ) {
-                        self.state = AppState::StreamSelection(ContentType::Movies, category.clone());
+                    // Quick back option - reload streams
+                    let category = if let Some(cat) = self
+                        .categories
+                        .iter()
+                        .find(|c| stream.category_id.as_ref() == Some(&c.category_id))
+                    {
+                        cat.clone()
                     } else {
-                        self.state = AppState::StreamSelection(ContentType::Movies, Category {
+                        Category {
                             category_id: "all".to_string(),
-                            category_name: "All".to_string(),  
+                            category_name: "All".to_string(),
                             parent_id: None,
-                        });
-                    }
-                    self.selected_index = 0;
-                    self.scroll_offset = 0;
+                        }
+                    };
+
+                    // Reload the streams for this category
+                    self.load_streams(ContentType::Movies, category).await;
                 }
                 _ => {}
             },
@@ -375,16 +398,23 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
-                    if let Some(category) = self.categories.iter().find(|c| {
-                        self.streams
-                            .iter()
-                            .any(|s| s.category_id == Some(c.category_id.clone()))
-                    }) {
-                        self.state =
-                            AppState::StreamSelection(ContentType::Series, category.clone());
-                        self.selected_index = 0;
-                        self.scroll_offset = 0;
-                    }
+                    // Go back to stream selection and reload series
+                    let category = self
+                        .categories
+                        .iter()
+                        .find(|c| {
+                            self.streams
+                                .iter()
+                                .any(|s| s.category_id == Some(c.category_id.clone()))
+                        })
+                        .cloned()
+                        .unwrap_or_else(|| Category {
+                            category_id: "all".to_string(),
+                            category_name: "All".to_string(),
+                            parent_id: None,
+                        });
+
+                    self.load_streams(ContentType::Series, category).await;
                 }
                 _ => {}
             },
@@ -1215,151 +1245,155 @@ impl App {
         self.add_log(format!("Fetching VOD info for: {}", stream.name));
         self.add_log("Connecting to server...".to_string());
         self.add_log("Requesting movie details...".to_string());
-        
+
         let vod_result = if let Some(api) = &mut self.current_api {
             api.get_vod_info(stream.stream_id).await
         } else {
             return;
         };
-        
+
         match vod_result {
             Ok(vod_info) => {
                 self.add_log("Successfully loaded movie information".to_string());
                 self.vod_info = Some(vod_info.clone());
-                    
-                    // Helper function to wrap text
-                    let wrap_text = |text: &str, width: usize, indent: &str| -> Vec<String> {
-                        let mut wrapped = Vec::new();
-                        let words = text.split_whitespace();
-                        let mut current_line = String::new();
-                        
-                        for word in words {
-                            if current_line.len() + word.len() + 1 > width {
-                                if !current_line.is_empty() {
-                                    wrapped.push(format!("{}{}", indent, current_line));
-                                    current_line = word.to_string();
-                                }
-                            } else {
-                                if !current_line.is_empty() {
-                                    current_line.push(' ');
-                                }
-                                current_line.push_str(word);
+
+                // Helper function to wrap text
+                let wrap_text = |text: &str, width: usize, indent: &str| -> Vec<String> {
+                    let mut wrapped = Vec::new();
+                    let words = text.split_whitespace();
+                    let mut current_line = String::new();
+
+                    for word in words {
+                        if current_line.len() + word.len() + 1 > width {
+                            if !current_line.is_empty() {
+                                wrapped.push(format!("{}{}", indent, current_line));
+                                current_line = word.to_string();
                             }
-                        }
-                        if !current_line.is_empty() {
-                            wrapped.push(format!("{}{}", indent, current_line));
-                        }
-                        wrapped
-                    };
-                    
-                    // Create info display items
-                    let mut items = vec![
-                        format!("📽️ {}", vod_info.info.name),
-                        String::new(),
-                    ];
-                    
-                    if let Some(ref plot) = vod_info.info.plot {
-                        let plot_trimmed = plot.trim();
-                        if !plot_trimmed.is_empty() {
-                            items.push("📝 Description:".to_string());
-                            items.extend(wrap_text(plot_trimmed, 75, "   "));
-                            items.push(String::new());
-                        }
-                    }
-                    
-                    if let Some(ref genre) = vod_info.info.genre {
-                        if !genre.trim().is_empty() {
-                            items.push(format!("🎭 Genre: {}", genre));
-                        }
-                    }
-                    
-                    if let Some(ref release_date) = vod_info.info.releasedate {
-                        if !release_date.trim().is_empty() {
-                            items.push(format!("📅 Release: {}", release_date));
-                        }
-                    }
-                    
-                    if let Some(ref rating) = vod_info.info.rating {
-                        if !rating.trim().is_empty() {
-                            items.push(format!("⭐ Rating: {}", rating));
-                        }
-                    }
-                    
-                    if let Some(ref duration) = vod_info.info.duration {
-                        if !duration.trim().is_empty() {
-                            items.push(format!("⏱️ Duration: {}", duration));
-                        }
-                    }
-                    
-                    if let Some(ref cast) = vod_info.info.cast {
-                        let cast_trimmed = cast.trim();
-                        if !cast_trimmed.is_empty() {
-                            items.push("👥 Cast:".to_string());
-                            items.extend(wrap_text(cast_trimmed, 75, "   "));
-                        }
-                    }
-                    
-                    if let Some(ref director) = vod_info.info.director {
-                        let director_trimmed = director.trim();
-                        if !director_trimmed.is_empty() {
-                            // Wrap director if it's too long
-                            if director_trimmed.len() > 60 {
-                                items.push("🎬 Director:".to_string());
-                                items.extend(wrap_text(director_trimmed, 75, "   "));
-                            } else {
-                                items.push(format!("🎬 Director: {}", director_trimmed));
+                        } else {
+                            if !current_line.is_empty() {
+                                current_line.push(' ');
                             }
+                            current_line.push_str(word);
                         }
                     }
-                    
-                    items.push(String::new());
-                    items.push(format!("📦 Format: {}", vod_info.movie_data.container_extension));
-                    
-                    // Add stream URL (wrapped if needed)
-                    let extension = Some(vod_info.movie_data.container_extension.as_str());
-                    let url = if let Some(api) = &self.current_api {
-                        api.get_stream_url(stream.stream_id, "movie", extension)
-                    } else {
-                        String::new()
-                    };
-                    items.push(String::new());
-                    items.push("🔗 Stream URL:".to_string());
-                    if url.len() > 75 {
-                        // Break long URLs at logical points
-                        let mut url_line = String::from("   ");
-                        for (i, ch) in url.chars().enumerate() {
-                            url_line.push(ch);
-                            if (i > 0 && i % 70 == 0) || (ch == '&' && url_line.len() > 40) {
-                                items.push(url_line.clone());
-                                url_line = String::from("   ");
-                            }
-                        }
-                        if url_line.len() > 3 {
-                            items.push(url_line);
-                        }
-                    } else {
-                        items.push(format!("   {}", url));
+                    if !current_line.is_empty() {
+                        wrapped.push(format!("{}{}", indent, current_line));
                     }
-                    
-                    // Add menu options
-                    items.push(String::new());
-                    items.push("─────────────────────────────────────".to_string());
-                    items.push(String::new());
-                    items.push("📌 Actions:".to_string());
-                    items.push(String::new());
-                    items.push("  ▶️  Play Movie".to_string());
-                    items.push("  📋 Copy URL to Logs".to_string());
-                    items.push("  ⬅️  Back to Movies".to_string());
-                    
-                    self.items = items;
-                    self.reset_filter();
-                    self.state = AppState::VodInfo(stream);
-                    // Start with "Play Movie" selected
-                    self.selected_index = self.items.iter().position(|s| s.contains("▶️  Play Movie")).unwrap_or(0);
-                    self.scroll_offset = 0;
-                    
-                    self.add_log(format!("Ready to play: {}", vod_info.info.name));
+                    wrapped
+                };
+
+                // Create info display items
+                let mut items = vec![format!("📽️ {}", vod_info.info.name), String::new()];
+
+                if let Some(ref plot) = vod_info.info.plot {
+                    let plot_trimmed = plot.trim();
+                    if !plot_trimmed.is_empty() {
+                        items.push("📝 Description:".to_string());
+                        items.extend(wrap_text(plot_trimmed, 75, "   "));
+                        items.push(String::new());
+                    }
                 }
+
+                if let Some(ref genre) = vod_info.info.genre {
+                    if !genre.trim().is_empty() {
+                        items.push(format!("🎭 Genre: {}", genre));
+                    }
+                }
+
+                if let Some(ref release_date) = vod_info.info.releasedate {
+                    if !release_date.trim().is_empty() {
+                        items.push(format!("📅 Release: {}", release_date));
+                    }
+                }
+
+                if let Some(ref rating) = vod_info.info.rating {
+                    if !rating.trim().is_empty() {
+                        items.push(format!("⭐ Rating: {}", rating));
+                    }
+                }
+
+                if let Some(ref duration) = vod_info.info.duration {
+                    if !duration.trim().is_empty() {
+                        items.push(format!("⏱️ Duration: {}", duration));
+                    }
+                }
+
+                if let Some(ref cast) = vod_info.info.cast {
+                    let cast_trimmed = cast.trim();
+                    if !cast_trimmed.is_empty() {
+                        items.push("👥 Cast:".to_string());
+                        items.extend(wrap_text(cast_trimmed, 75, "   "));
+                    }
+                }
+
+                if let Some(ref director) = vod_info.info.director {
+                    let director_trimmed = director.trim();
+                    if !director_trimmed.is_empty() {
+                        // Wrap director if it's too long
+                        if director_trimmed.len() > 60 {
+                            items.push("🎬 Director:".to_string());
+                            items.extend(wrap_text(director_trimmed, 75, "   "));
+                        } else {
+                            items.push(format!("🎬 Director: {}", director_trimmed));
+                        }
+                    }
+                }
+
+                items.push(String::new());
+                items.push(format!(
+                    "📦 Format: {}",
+                    vod_info.movie_data.container_extension
+                ));
+
+                // Add stream URL (wrapped if needed)
+                let extension = Some(vod_info.movie_data.container_extension.as_str());
+                let url = if let Some(api) = &self.current_api {
+                    api.get_stream_url(stream.stream_id, "movie", extension)
+                } else {
+                    String::new()
+                };
+                items.push(String::new());
+                items.push("🔗 Stream URL:".to_string());
+                if url.len() > 75 {
+                    // Break long URLs at logical points
+                    let mut url_line = String::from("   ");
+                    for (i, ch) in url.chars().enumerate() {
+                        url_line.push(ch);
+                        if (i > 0 && i % 70 == 0) || (ch == '&' && url_line.len() > 40) {
+                            items.push(url_line.clone());
+                            url_line = String::from("   ");
+                        }
+                    }
+                    if url_line.len() > 3 {
+                        items.push(url_line);
+                    }
+                } else {
+                    items.push(format!("   {}", url));
+                }
+
+                // Add menu options
+                items.push(String::new());
+                items.push("─────────────────────────────────────".to_string());
+                items.push(String::new());
+                items.push("📌 Actions:".to_string());
+                items.push(String::new());
+                items.push("  ▶️  Play Movie".to_string());
+                items.push("  📋 Copy URL to Logs".to_string());
+                items.push("  ⬅️  Back to Movies".to_string());
+
+                self.items = items;
+                self.reset_filter();
+                self.state = AppState::VodInfo(stream);
+                // Start with "Play Movie" selected
+                self.selected_index = self
+                    .items
+                    .iter()
+                    .position(|s| s.contains("▶️  Play Movie"))
+                    .unwrap_or(0);
+                self.scroll_offset = 0;
+
+                self.add_log(format!("Ready to play: {}", vod_info.info.name));
+            }
             Err(e) => {
                 self.add_log(format!("Failed to load VOD info: {}", e));
                 self.add_log("Falling back to direct playback...".to_string());
@@ -1368,23 +1402,25 @@ impl App {
             }
         }
     }
-    
+
     async fn play_vod_stream(&mut self, stream: &Stream) {
         // Store the current state to return to after starting playback
         let return_state = self.state.clone();
-        
+
         self.add_log(format!("Playing: {}", stream.name));
-        
+
         if let Some(api) = &self.current_api {
             // Use the container extension from VOD info if available
-            let extension = self.vod_info.as_ref()
+            let extension = self
+                .vod_info
+                .as_ref()
                 .map(|info| info.movie_data.container_extension.as_str());
-            
+
             let url = api.get_stream_url(stream.stream_id, "movie", extension);
-            
+
             // Log the stream URL
             self.add_log(format!("Stream URL: {}", url));
-            
+
             // Use TUI-specific play method that runs in background
             if let Err(e) = self.player.play_tui(&url).await {
                 self.state = AppState::Error(format!("Failed to play movie: {}", e));

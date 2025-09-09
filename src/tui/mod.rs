@@ -8,7 +8,6 @@ pub mod widgets;
 
 use anyhow::Result;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -39,7 +38,7 @@ impl Tui {
 
     pub fn init(&mut self) -> Result<()> {
         enable_raw_mode()?;
-        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+        execute!(io::stdout(), EnterAlternateScreen)?;
         self.terminal.hide_cursor()?;
         self.terminal.clear()?;
         Ok(())
@@ -52,7 +51,7 @@ impl Tui {
 
     pub fn exit(&mut self) -> Result<()> {
         disable_raw_mode()?;
-        execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
+        execute!(io::stdout(), LeaveAlternateScreen)?;
         self.terminal.show_cursor()?;
         Ok(())
     }
