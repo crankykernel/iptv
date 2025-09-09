@@ -4,11 +4,18 @@
 use crate::config::ProviderConfig;
 use crate::player::Player;
 use crate::xtream_api::{Category, Episode, Season, XTreamAPI};
+use crate::FavouritesManager;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use inquire::Select;
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
+
+enum ProviderSelection {
+    Provider(ProviderConfig),
+    AllFavourites,
+    Exit,
+}
 
 pub struct MenuSystem {
     providers: Vec<ProviderConfig>,
@@ -74,14 +81,25 @@ impl MenuSystem {
         // If multiple providers, show provider selection first
         if self.providers.len() > 1 {
             loop {
-                if let Some(provider) = self.select_provider().await? {
-                    if let Err(e) = self.connect_to_provider(&provider).await {
-                        println!("❌ Failed to connect to provider: {}", e);
+                match self.select_provider_or_favourites().await? {
+                    ProviderSelection::Provider(provider) => {
+                        if let Err(e) = self.connect_to_provider(&provider).await {
+                            println!("❌ Failed to connect to provider: {}", e);
+                            continue;
+                        }
+                    }
+                    ProviderSelection::AllFavourites => {
+                        if let Err(e) = self.browse_all_favourites().await {
+                            println!("❌ Error: {}", e);
+                            println!("Press Enter to continue...");
+                            let _ = std::io::stdin().read_line(&mut String::new());
+                        }
                         continue;
                     }
-                } else {
-                    println!("Goodbye!");
-                    return Ok(());
+                    ProviderSelection::Exit => {
+                        println!("Goodbye!");
+                        return Ok(());
+                    }
                 }
 
                 // Check if player is available
@@ -172,34 +190,39 @@ impl MenuSystem {
         Ok(())
     }
 
-    async fn select_provider(&self) -> Result<Option<ProviderConfig>> {
-        let provider_names: Vec<String> = self
-            .providers
-            .iter()
-            .map(|p| {
-                p.name.clone().unwrap_or_else(|| {
-                    // Extract hostname from URL if no name is provided
-                    if let Ok(url) = url::Url::parse(&p.url) {
-                        url.host_str().unwrap_or(&p.url).to_string()
-                    } else {
-                        p.url.clone()
-                    }
-                })
-            })
-            .collect();
+    async fn select_provider_or_favourites(&self) -> Result<ProviderSelection> {
+        // Build menu options
+        let mut options = vec!["⭐ All Favourites".to_string()];
+        
+        // Add provider names
+        for provider in &self.providers {
+            let name = provider.name.clone().unwrap_or_else(|| {
+                // Extract hostname from URL if no name is provided
+                if let Ok(url) = url::Url::parse(&provider.url) {
+                    url.host_str().unwrap_or(&provider.url).to_string()
+                } else {
+                    provider.url.clone()
+                }
+            });
+            options.push(format!("📡 {}", name));
+        }
 
-        let selection = Select::new("Select IPTV provider:", provider_names.clone())
+        let selection = Select::new("Select an option:", options.clone())
             .with_page_size(self.page_size)
             .prompt_skippable()?;
 
-        if let Some(selected_name) = selection {
-            let selected_index = provider_names
-                .iter()
-                .position(|name| name == &selected_name)
-                .unwrap();
-            Ok(Some(self.providers[selected_index].clone()))
-        } else {
-            Ok(None)
+        match selection {
+            Some(selected) if selected == "⭐ All Favourites" => {
+                Ok(ProviderSelection::AllFavourites)
+            }
+            Some(selected) => {
+                // Find the provider index (subtract 1 for the "All Favourites" option)
+                let provider_index = options.iter()
+                    .position(|opt| opt == &selected)
+                    .unwrap() - 1;
+                Ok(ProviderSelection::Provider(self.providers[provider_index].clone()))
+            }
+            None => Ok(ProviderSelection::Exit),
         }
     }
 
@@ -265,6 +288,82 @@ impl MenuSystem {
             .prompt_skippable()?;
 
         Ok(selection)
+    }
+
+    async fn browse_all_favourites(&mut self) -> Result<()> {
+        println!("\n⭐ All Favourites (across all providers)");
+        println!("===========================================");
+        
+        let favourites_manager = FavouritesManager::new()?;
+        let mut all_favourites = Vec::new();
+        
+        // Collect favourites from all providers
+        for provider in &self.providers {
+            let api = XTreamAPI::new(
+                provider.url.clone(),
+                provider.username.clone(),
+                provider.password.clone(),
+                provider.name.clone(),
+            )?;
+            
+            let provider_favs = favourites_manager.get_favourites(&api.provider_hash)?;
+            for fav in provider_favs {
+                all_favourites.push((fav, provider.clone()));
+            }
+        }
+        
+        if all_favourites.is_empty() {
+            println!("No favourites found across any provider.");
+            println!("Press Enter to continue...");
+            let _ = std::io::stdin().read_line(&mut String::new());
+            return Ok(());
+        }
+        
+        loop {
+            let favourite_options: Vec<String> = all_favourites
+                .iter()
+                .map(|(fav, provider)| {
+                    let provider_name = provider.name.as_ref()
+                        .unwrap_or(&provider.url);
+                    format!("{} [{}]", fav.name, provider_name)
+                })
+                .collect();
+            
+            let selection = Select::new("Select a favourite:", favourite_options.clone())
+                .with_page_size(self.page_size)
+                .prompt_skippable()?;
+            
+            if let Some(selected_name) = selection {
+                let selected_index = favourite_options
+                    .iter()
+                    .position(|name| name == &selected_name)
+                    .unwrap();
+                
+                let (selected_favourite, provider) = &all_favourites[selected_index];
+                
+                // Connect to the provider if not already connected
+                if self.current_api.is_none() || 
+                   self.current_api.as_ref().unwrap().provider_hash != 
+                   XTreamAPI::new(provider.url.clone(), provider.username.clone(), 
+                                  provider.password.clone(), provider.name.clone())?.provider_hash {
+                    self.connect_to_provider(&provider).await?;
+                }
+                
+                // Play the favourite
+                let api = self.current_api.as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
+                let stream_url = api.get_stream_url(
+                    selected_favourite.stream_id,
+                    &selected_favourite.stream_type,
+                    None,
+                );
+                self.player.play(&stream_url)?;
+            } else {
+                break;
+            }
+        }
+        
+        Ok(())
     }
 
     async fn browse_favourites(&mut self) -> Result<()> {
