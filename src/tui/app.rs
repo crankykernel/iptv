@@ -10,6 +10,7 @@ use crate::xtream_api::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
+use std::collections::HashMap;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
@@ -66,6 +67,10 @@ pub struct App {
     favourites: Vec<FavouriteStream>,
     cross_provider_favourites: Vec<(FavouriteStream, ProviderConfig)>,
     vod_info: Option<VodInfoResponse>,
+    // Cache for categories by content type
+    cached_categories: HashMap<ContentType, Vec<Category>>,
+    // Cache for streams by content type and category ID
+    cached_streams: HashMap<(ContentType, String), Vec<Stream>>,
 }
 
 impl App {
@@ -115,6 +120,8 @@ impl App {
             favourites: Vec::new(),
             cross_provider_favourites: Vec::new(),
             vod_info: None,
+            cached_categories: HashMap::new(),
+            cached_streams: HashMap::new(),
         }
     }
 
@@ -231,6 +238,12 @@ impl App {
                 KeyCode::PageDown => self.move_selection_page_down(),
                 KeyCode::Home => self.move_selection_home(),
                 KeyCode::End => self.move_selection_end(),
+                KeyCode::Char('r') => {
+                    // Force refresh categories
+                    let ct = content_type.clone();
+                    self.add_log("Refreshing categories...".to_string());
+                    self.load_categories_internal(ct, true).await;
+                }
                 KeyCode::Enter => {
                     if self.selected_index < self.categories.len() {
                         let category = self.categories[self.selected_index].clone();
@@ -245,13 +258,20 @@ impl App {
                 }
                 _ => {}
             },
-            AppState::StreamSelection(content_type, _category) => match key.code {
+            AppState::StreamSelection(content_type, category) => match key.code {
                 KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
                 KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
                 KeyCode::PageUp => self.move_selection_page_up(),
                 KeyCode::PageDown => self.move_selection_page_down(),
                 KeyCode::Home => self.move_selection_home(),
                 KeyCode::End => self.move_selection_end(),
+                KeyCode::Char('r') => {
+                    // Force refresh streams
+                    let ct = content_type.clone();
+                    let cat = category.clone();
+                    self.add_log("Refreshing streams...".to_string());
+                    self.load_streams_internal(ct, cat, true).await;
+                }
                 KeyCode::Char('f') => {
                     if self.selected_index < self.streams.len() {
                         let stream = self.streams[self.selected_index].clone();
@@ -720,6 +740,9 @@ impl App {
         ) {
             Ok(api) => {
                 self.current_api = Some(api);
+                // Clear caches when switching providers
+                self.cached_categories.clear();
+                self.cached_streams.clear();
                 self.state = AppState::MainMenu;
                 self.selected_index = 0;
                 self.scroll_offset = 0;
@@ -769,6 +792,29 @@ impl App {
     }
 
     async fn load_categories(&mut self, content_type: ContentType) {
+        self.load_categories_internal(content_type, false).await;
+    }
+
+    async fn load_categories_internal(&mut self, content_type: ContentType, force_refresh: bool) {
+        // Check cache first if not forcing refresh
+        if !force_refresh {
+            if let Some(cached) = self.cached_categories.get(&content_type) {
+                let ct = content_type.clone();
+                self.categories = cached.clone();
+                self.add_log(format!("Using cached {} categories", ct));
+                self.items = self
+                    .categories
+                    .iter()
+                    .map(|c| c.category_name.clone())
+                    .collect();
+                self.reset_filter();
+                self.state = AppState::CategorySelection(content_type.clone());
+                self.selected_index = 0;
+                self.scroll_offset = 0;
+                return;
+            }
+        }
+
         self.state = AppState::Loading(format!("Loading {} categories...", content_type));
         self.add_log(format!("Loading {} categories", content_type));
 
@@ -788,6 +834,10 @@ impl App {
                         parent_id: None,
                     };
                     categories.insert(0, all_category);
+
+                    // Store in cache
+                    self.cached_categories
+                        .insert(content_type.clone(), categories.clone());
 
                     self.categories = categories;
                     self.items = self
@@ -810,6 +860,55 @@ impl App {
     }
 
     async fn load_streams(&mut self, content_type: ContentType, category: Category) {
+        self.load_streams_internal(content_type, category, false)
+            .await;
+    }
+
+    async fn load_streams_internal(
+        &mut self,
+        content_type: ContentType,
+        category: Category,
+        force_refresh: bool,
+    ) {
+        // Check cache first if not forcing refresh
+        let cache_key = (content_type.clone(), category.category_id.clone());
+        if !force_refresh {
+            if let Some(cached) = self.cached_streams.get(&cache_key) {
+                let cat_name = category.category_name.clone();
+                self.streams = cached.clone();
+                self.add_log(format!("Using cached streams for {}", cat_name));
+
+                // Get list of favourites to mark them with a star
+                let favourites = if let Some(api) = &self.current_api {
+                    api.favourites_manager
+                        .get_favourites(&api.provider_hash)
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+
+                // Create item list with stars for favourites
+                self.items = self
+                    .streams
+                    .iter()
+                    .map(|s| {
+                        let is_favourite = favourites.iter().any(|f| f.stream_id == s.stream_id);
+                        if is_favourite {
+                            format!("⭐ {}", s.name)
+                        } else {
+                            s.name.clone()
+                        }
+                    })
+                    .collect();
+
+                self.reset_filter();
+                self.state = AppState::StreamSelection(content_type, category);
+                self.selected_index = 0;
+                self.scroll_offset = 0;
+                return;
+            }
+        }
+
         self.state = AppState::Loading(format!(
             "Loading streams from {}...",
             category.category_name
@@ -858,6 +957,9 @@ impl App {
 
             match result {
                 Ok(streams) => {
+                    // Store in cache
+                    self.cached_streams.insert(cache_key, streams.clone());
+
                     self.streams = streams;
 
                     // Get list of favourites to mark them with a star

@@ -24,7 +24,7 @@ pub struct MenuSystem {
     page_size: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum ContentType {
     Live,
     Movies,
