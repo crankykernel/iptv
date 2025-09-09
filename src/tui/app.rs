@@ -237,7 +237,12 @@ impl App {
                     KeyCode::PageDown => self.move_selection_page_down(),
                     KeyCode::Home => self.move_selection_home(),
                     KeyCode::End => self.move_selection_end(),
-                    // TODO: Add favourite toggling when available
+                    KeyCode::Char('f') => {
+                        if self.selected_index < self.streams.len() {
+                            let stream = self.streams[self.selected_index].clone();
+                            self.toggle_favourite_stream(&stream).await;
+                        }
+                    }
                     KeyCode::Enter => {
                         if self.selected_index < self.streams.len() {
                             let stream = self.streams[self.selected_index].clone();
@@ -526,7 +531,15 @@ impl App {
             };
 
             match result {
-                Ok(categories) => {
+                Ok(mut categories) => {
+                    // Add "All" category at the beginning
+                    let all_category = Category {
+                        category_id: "all".to_string(),
+                        category_name: "All".to_string(),
+                        parent_id: None,
+                    };
+                    categories.insert(0, all_category);
+                    
                     self.categories = categories;
                     self.items = self
                         .categories
@@ -558,11 +571,18 @@ impl App {
         ));
 
         if let Some(api) = &mut self.current_api {
+            // Pass None for "All" category to get all streams
+            let category_id = if category.category_id == "all" {
+                None
+            } else {
+                Some(category.category_id.as_str())
+            };
+            
             let result = match content_type {
-                ContentType::Live => api.get_live_streams(Some(&category.category_id)).await,
-                ContentType::Movies => api.get_vod_streams(Some(&category.category_id)).await,
+                ContentType::Live => api.get_live_streams(category_id).await,
+                ContentType::Movies => api.get_vod_streams(category_id).await,
                 ContentType::Series => {
-                    api.get_series(Some(&category.category_id))
+                    api.get_series(category_id)
                         .await
                         .map(|series_infos| {
                             series_infos
@@ -594,7 +614,24 @@ impl App {
             match result {
                 Ok(streams) => {
                     self.streams = streams;
-                    self.items = self.streams.iter().map(|s| s.name.clone()).collect();
+                    
+                    // Get list of favourites to mark them with a star
+                    let favourites = if let Some(api) = &self.current_api {
+                        api.cache_manager.get_favourites(&api.provider_hash).await.unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    
+                    // Create item list with stars for favourites
+                    self.items = self.streams.iter().map(|s| {
+                        let is_favourite = favourites.iter().any(|f| f.stream_id == s.stream_id);
+                        if is_favourite {
+                            format!("⭐ {}", s.name)
+                        } else {
+                            s.name.clone()
+                        }
+                    }).collect();
+                    
                     self.reset_filter();
                     self.state = AppState::StreamSelection(content_type, category);
                     self.selected_index = 0;
@@ -721,7 +758,50 @@ impl App {
         }
     }
 
-    // TODO: Implement favourite toggling when Stream has is_favourite field
+    async fn toggle_favourite_stream(&mut self, stream: &Stream) {
+        if let Some(api) = &self.current_api {
+            // Check if this stream is already a favourite
+            let favourites = api.cache_manager.get_favourites(&api.provider_hash).await.unwrap_or_default();
+            let is_favourite = favourites.iter().any(|f| f.stream_id == stream.stream_id);
+            
+            if is_favourite {
+                // Remove from favourites
+                let _ = api.cache_manager.remove_favourite(
+                    &api.provider_hash, 
+                    stream.stream_id, 
+                    &stream.stream_type
+                ).await;
+                self.add_log(format!("Removed {} from favourites", stream.name));
+                
+                // Update the display to show the star is removed
+                if let Some(item) = self.items.get_mut(self.selected_index) {
+                    if item.starts_with("⭐ ") {
+                        *item = item[4..].to_string(); // Remove the star prefix
+                    }
+                }
+            } else {
+                // Add to favourites
+                let favourite = crate::xtream_api::FavouriteStream {
+                    stream_id: stream.stream_id,
+                    name: stream.name.clone(),
+                    stream_type: stream.stream_type.clone(),
+                    provider_hash: api.provider_hash.clone(),
+                    added_date: chrono::Utc::now(),
+                    category_id: stream.category_id.clone(),
+                };
+                
+                let _ = api.cache_manager.add_favourite(&api.provider_hash, favourite).await;
+                self.add_log(format!("Added {} to favourites", stream.name));
+                
+                // Update the display to show the star
+                if let Some(item) = self.items.get_mut(self.selected_index) {
+                    if !item.starts_with("⭐ ") {
+                        *item = format!("⭐ {}", item);
+                    }
+                }
+            }
+        }
+    }
 
     async fn remove_favourite(&mut self, index: usize) {
         if index < self.favourites.len() {
