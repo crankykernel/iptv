@@ -67,10 +67,13 @@ pub struct App {
 impl App {
     pub fn new(providers: Vec<ProviderConfig>, player: Player) -> Self {
         let items = if providers.len() > 1 {
-            providers
-                .iter()
-                .map(|p| p.name.clone().unwrap_or_else(|| p.url.clone()))
-                .collect()
+            let mut items = vec!["⭐ All Favourites".to_string()];
+            items.extend(
+                providers
+                    .iter()
+                    .map(|p| format!("📡 {}", p.name.clone().unwrap_or_else(|| p.url.clone())))
+            );
+            items
         } else {
             vec![]
         };
@@ -83,6 +86,8 @@ impl App {
             AppState::Error("No providers configured".to_string())
         };
 
+        let filtered_indices = (0..items.len()).collect();
+        
         Self {
             state,
             providers,
@@ -98,7 +103,7 @@ impl App {
             page_size: 20,
             search_query: String::new(),
             search_active: false,
-            filtered_indices: Vec::new(),
+            filtered_indices,
             categories: Vec::new(),
             streams: Vec::new(),
             seasons: Vec::new(),
