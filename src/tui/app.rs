@@ -331,6 +331,9 @@ impl App {
                     if self.selected_index < self.cross_provider_favourites.len() {
                         let (favourite, provider) = self.cross_provider_favourites[self.selected_index].clone();
                         
+                        // Store the current state to return to after starting playback
+                        let return_state = self.state.clone();
+                        
                         // Connect to provider if needed
                         if self.current_api.is_none() || 
                            self.current_api.as_ref().unwrap().provider_hash != 
@@ -340,17 +343,23 @@ impl App {
                             self.connect_to_provider(&provider).await;
                         }
                         
-                        // Play the favourite
+                        // Play the favourite using TUI-specific method
                         if let Some(api) = &self.current_api {
                             let stream_url = api.get_stream_url(
                                 favourite.stream_id,
                                 &favourite.stream_type,
                                 None,
                             );
-                            if let Err(e) = self.player.play(&stream_url) {
-                                self.add_log(format!("Failed to play: {}", e));
+                            
+                            // Use TUI-specific play method that runs in background
+                            if let Err(e) = self.player.play_tui(&stream_url).await {
+                                self.state = AppState::Error(format!("Failed to play favourite: {}", e));
+                                self.add_log(format!("Playback failed: {}", e));
                             } else {
-                                self.state = AppState::Playing(favourite.name);
+                                self.add_log("Player started in background window".to_string());
+                                self.add_log("Continue browsing while video plays".to_string());
+                                // Return to the current state so user can continue browsing
+                                self.state = return_state;
                             }
                         }
                     }
