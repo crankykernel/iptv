@@ -202,7 +202,6 @@ pub struct XTreamAPI {
     base_url: String,
     username: String,
     password: String,
-    cache_ttl_seconds: u64,
     provider_name: Option<String>,
     pub cache_manager: CacheManager,
     pub provider_hash: String,
@@ -213,7 +212,6 @@ impl XTreamAPI {
         server_url: String,
         username: String,
         password: String,
-        cache_ttl_seconds: u64,
         provider_name: Option<String>,
     ) -> Result<Self> {
         let url = reqwest::Url::parse(&server_url).with_context(|| "Invalid server URL")?;
@@ -244,7 +242,6 @@ impl XTreamAPI {
             base_url: base_url.clone(),
             username,
             password,
-            cache_ttl_seconds,
             provider_name,
             cache_manager,
             provider_hash,
@@ -394,7 +391,7 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            self.cache_ttl_seconds,
+            u64::MAX, // Never expire cache
         );
 
         if let Err(e) = self
@@ -430,7 +427,7 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            self.cache_ttl_seconds,
+            u64::MAX, // Never expire cache
         );
 
         if let Err(e) = self
@@ -466,7 +463,7 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            self.cache_ttl_seconds,
+            u64::MAX, // Never expire cache
         );
 
         if let Err(e) = self
@@ -502,7 +499,7 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            self.cache_ttl_seconds,
+            u64::MAX, // Never expire cache
         );
 
         if let Err(e) = self
@@ -555,7 +552,7 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            self.cache_ttl_seconds,
+            u64::MAX, // Never expire cache
         );
 
         // Always cache the full "All" response
@@ -625,7 +622,7 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            self.cache_ttl_seconds,
+            u64::MAX, // Never expire cache
         );
 
         // Always cache the full "All" response
@@ -695,7 +692,7 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            self.cache_ttl_seconds,
+            u64::MAX, // Never expire cache
         );
 
         // Always cache the full "All" response

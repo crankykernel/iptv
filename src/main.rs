@@ -75,7 +75,6 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
             provider.url.clone(),
             provider.username.clone(),
             provider.password.clone(),
-            3600, // Default cache TTL
             provider.name.clone(),
         )?;
 
@@ -206,7 +205,6 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
             selected_item.provider_config.url.clone(),
             selected_item.provider_config.username.clone(),
             selected_item.provider_config.password.clone(),
-            3600, // Default cache TTL
             selected_item.provider_config.name.clone(),
         )?;
 

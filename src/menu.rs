@@ -213,7 +213,6 @@ impl MenuSystem {
             provider.url.clone(),
             provider.username.clone(),
             provider.password.clone(),
-            3600, // Default cache TTL
             provider.name.clone(),
         )?;
 

@@ -54,7 +54,7 @@ impl Default for Config {
                 args: vec!["--fs".to_string(), "--quiet".to_string()],
             },
             cache: CacheConfig {
-                ttl_seconds: 3600,
+                ttl_seconds: u64::MAX, // Never expire cache
                 max_entries: 1000,
             },
             ui: UiConfig {
