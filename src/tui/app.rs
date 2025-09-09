@@ -103,20 +103,8 @@ impl App {
 
     pub fn tick(&mut self) {
         // Update any time-based UI elements here
-        
-        // Check if player is still running when in Playing state
-        if matches!(self.state, AppState::Playing(_)) {
-            let player = self.player.clone();
-            
-            // Check player status asynchronously
-            tokio::spawn(async move {
-                if !player.is_playing_tui().await {
-                    // Player has stopped, but we can't update state from here
-                    // This would need a channel or shared state mechanism
-                    // For now, the user needs to press 's' or Esc to return
-                }
-            });
-        }
+        // Removed the player check as it was spawning tasks unnecessarily
+        // Player status will be checked when user presses a key
     }
 
     pub async fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {

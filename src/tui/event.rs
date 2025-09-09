@@ -21,40 +21,42 @@ pub struct EventHandler {
 }
 
 impl EventHandler {
-    pub fn new(tick_rate: u64) -> Self {
+    pub fn new(_tick_rate: u64) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let sender_clone = sender.clone();
 
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_millis(tick_rate));
+        // Use a separate thread for blocking I/O to avoid async overhead
+        std::thread::spawn(move || {
             loop {
-                let event = if event::poll(Duration::from_millis(50)).unwrap_or(false) {
-                    match event::read() {
+                // Use a very short timeout (1ms) for responsive input
+                // This is still non-blocking but much more responsive
+                if event::poll(Duration::from_millis(1)).unwrap_or(false) {
+                    let event = match event::read() {
                         Ok(CrosstermEvent::Key(key)) => Some(Event::Key(key)),
                         Ok(CrosstermEvent::Mouse(mouse)) => Some(Event::Mouse(mouse)),
                         Ok(CrosstermEvent::Resize(width, height)) => {
                             Some(Event::Resize(width, height))
                         }
                         _ => None,
+                    };
+
+                    if let Some(event) = event {
+                        if sender_clone.send(event).is_err() {
+                            break;
+                        }
                     }
                 } else {
-                    None
-                };
-
-                if let Some(event) = event {
-                    if sender_clone.send(event).is_err() {
-                        break;
-                    }
-                }
-
-                interval.tick().await;
-                if sender_clone.send(Event::Tick).is_err() {
-                    break;
+                    // Small sleep to prevent CPU spinning when no events
+                    std::thread::sleep(Duration::from_millis(1));
                 }
             }
         });
 
-        Self { sender, receiver }
+        Self { 
+            #[allow(dead_code)]
+            sender, 
+            receiver 
+        }
     }
 
     pub async fn next(&mut self) -> Result<Event> {
