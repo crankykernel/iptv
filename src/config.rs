@@ -37,6 +37,8 @@ pub struct CacheConfig {
 pub struct UiConfig {
     pub page_size: usize,
     pub search_debounce_ms: u64,
+    #[serde(default)]
+    pub filter_english_only_series: bool,
 }
 
 impl Default for Config {
@@ -58,6 +60,7 @@ impl Default for Config {
             ui: UiConfig {
                 page_size: 20,
                 search_debounce_ms: 300,
+                filter_english_only_series: false,
             },
         }
     }
