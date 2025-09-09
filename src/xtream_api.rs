@@ -20,14 +20,19 @@ where
 
     match value {
         Value::Array(arr) => {
-            let strings: Result<Vec<String>, _> = arr
+            let strings: Vec<String> = arr
                 .into_iter()
-                .map(|v| match v {
-                    Value::String(s) => Ok(s),
-                    _ => Err(D::Error::custom("Array contains non-string value")),
+                .filter_map(|v| match v {
+                    Value::String(s) => Some(s),
+                    Value::Null => None, // Skip null values
+                    _ => None,           // Skip other non-string values
                 })
                 .collect();
-            Ok(Some(strings?))
+            if strings.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(strings))
+            }
         }
         Value::String(s) => {
             if s.is_empty() {
@@ -100,7 +105,9 @@ pub struct Stream {
     #[serde(default)]
     pub added: Option<String>,
     #[serde(default)]
-    pub category_id: String,
+    pub category_id: Option<String>,
+    #[serde(default)]
+    pub category_ids: Option<Vec<u32>>,
     #[serde(default)]
     pub custom_sid: Option<String>,
     #[serde(default)]
@@ -153,7 +160,7 @@ pub struct SeriesInfo {
     #[serde(default)]
     pub rating: Option<String>,
     #[serde(default)]
-    pub rating_5based: Option<f32>,
+    pub rating_5based: Option<Value>,
     #[serde(default, deserialize_with = "deserialize_string_or_vec")]
     pub backdrop_path: Option<Vec<String>>,
     #[serde(default)]
@@ -161,7 +168,32 @@ pub struct SeriesInfo {
     #[serde(default)]
     pub episode_run_time: Option<String>,
     #[serde(default)]
-    pub category_id: String,
+    pub category_id: Option<String>,
+    // Additional fields that might appear in series responses
+    #[serde(default)]
+    pub category_ids: Option<Vec<u32>>,
+    #[serde(default)]
+    pub added: Option<String>,
+    #[serde(default)]
+    pub is_adult: Option<Value>,
+    #[serde(default)]
+    pub stream_type: Option<String>,
+    #[serde(default)]
+    pub stream_icon: Option<String>,
+    #[serde(default)]
+    pub epg_channel_id: Option<Value>,
+    #[serde(default)]
+    pub custom_sid: Option<String>,
+    #[serde(default)]
+    pub tv_archive: Option<Value>,
+    #[serde(default)]
+    pub direct_source: Option<String>,
+    #[serde(default)]
+    pub tv_archive_duration: Option<Value>,
+    #[serde(default)]
+    pub stream_id: Option<u32>,
+    #[serde(default)]
+    pub tmdb: Option<String>,
 }
 
 #[derive(Debug)]
@@ -303,17 +335,42 @@ impl XTreamAPI {
             return Err(anyhow::anyhow!("Empty response from server"));
         }
 
-        let json: T = serde_json::from_str(&response_text).with_context(|| {
-            let truncated_response = if response_text.len() > 500 {
+        let json: T = serde_json::from_str(&response_text).map_err(|e| {
+            // Get detailed error information with character position
+            let error_msg = {
+                let line_num = e.line();
+                let col_num = e.column();
+
+                // Calculate byte position approximately
+                let lines: Vec<&str> = response_text.lines().collect();
+                let mut byte_pos = 0;
+                for (i, line_content) in lines.iter().enumerate() {
+                    if i + 1 == line_num {
+                        byte_pos += col_num.saturating_sub(1);
+                        break;
+                    }
+                    byte_pos += line_content.len() + 1; // +1 for newline
+                }
+
+                // Get context around the error (100 chars before and after)
+                let start = byte_pos.saturating_sub(100);
+                let end = std::cmp::min(byte_pos + 100, response_text.len());
+                let context = &response_text[start..end];
+
                 format!(
-                    "{}... (truncated {} bytes)",
-                    &response_text[..500],
-                    response_text.len()
+                    "JSON parsing failed at line {}, column {} (byte position ~{}):\n\
+                    Context: ...{}...\n\
+                    Error: {}",
+                    line_num,
+                    col_num,
+                    byte_pos,
+                    context.replace(['\n', '\r'], " "),
+                    e
                 )
-            } else {
-                response_text.clone()
             };
-            format!("Failed to parse JSON response: {}", truncated_response)
+
+            warn!("JSON parsing error: {}", error_msg);
+            anyhow::anyhow!(error_msg)
         })?;
 
         pb.finish_and_clear();
@@ -477,7 +534,13 @@ impl XTreamAPI {
                     cached
                         .data
                         .into_iter()
-                        .filter(|stream| stream.category_id == cat_id)
+                        .filter(|stream| {
+                            stream
+                                .category_id
+                                .as_ref()
+                                .map(|id| id == cat_id)
+                                .unwrap_or(false)
+                        })
                         .collect()
                 } else {
                     cached.data
@@ -514,7 +577,13 @@ impl XTreamAPI {
         let result_streams = if let Some(cat_id) = category_id {
             streams
                 .into_iter()
-                .filter(|stream| stream.category_id == cat_id)
+                .filter(|stream| {
+                    stream
+                        .category_id
+                        .as_ref()
+                        .map(|id| id == cat_id)
+                        .unwrap_or(false)
+                })
                 .collect()
         } else {
             streams
@@ -535,7 +604,13 @@ impl XTreamAPI {
                     cached
                         .data
                         .into_iter()
-                        .filter(|stream| stream.category_id == cat_id)
+                        .filter(|stream| {
+                            stream
+                                .category_id
+                                .as_ref()
+                                .map(|id| id == cat_id)
+                                .unwrap_or(false)
+                        })
                         .collect()
                 } else {
                     cached.data
@@ -572,7 +647,13 @@ impl XTreamAPI {
         let result_streams = if let Some(cat_id) = category_id {
             streams
                 .into_iter()
-                .filter(|stream| stream.category_id == cat_id)
+                .filter(|stream| {
+                    stream
+                        .category_id
+                        .as_ref()
+                        .map(|id| id == cat_id)
+                        .unwrap_or(false)
+                })
                 .collect()
         } else {
             streams
@@ -593,7 +674,13 @@ impl XTreamAPI {
                     cached
                         .data
                         .into_iter()
-                        .filter(|series| series.category_id == cat_id)
+                        .filter(|series| {
+                            series
+                                .category_id
+                                .as_ref()
+                                .map(|id| id == cat_id)
+                                .unwrap_or(false)
+                        })
                         .collect()
                 } else {
                     cached.data
@@ -630,7 +717,13 @@ impl XTreamAPI {
         let result_series = if let Some(cat_id) = category_id {
             series
                 .into_iter()
-                .filter(|series| series.category_id == cat_id)
+                .filter(|series| {
+                    series
+                        .category_id
+                        .as_ref()
+                        .map(|id| id == cat_id)
+                        .unwrap_or(false)
+                })
                 .collect()
         } else {
             series
@@ -795,10 +888,7 @@ impl XTreamAPI {
                     debug!("Warmed 'All' {} streams", content_type);
                 }
                 Err(e) => {
-                    warn!(
-                        "Failed to warm {} 'All' streams: {}",
-                        content_type, e
-                    );
+                    warn!("Failed to warm {} 'All' streams: {}", content_type, e);
                 }
             }
         }

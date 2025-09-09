@@ -5,10 +5,10 @@ use crate::config::ProviderConfig;
 use crate::player::Player;
 use crate::xtream_api::{Category, XTreamAPI};
 use anyhow::Result;
-use inquire::Select;
-use tracing::{info, warn};
 use chrono::{DateTime, Utc};
+use inquire::Select;
 use std::collections::HashMap;
+use tracing::{info, warn};
 
 pub struct MenuSystem {
     providers: Vec<ProviderConfig>,
@@ -223,13 +223,13 @@ impl MenuSystem {
                 if user_info.auth == 1 {
                     // Parse expiration timestamp and format as human-readable date
                     let expires_msg = if let Ok(exp_timestamp) = user_info.exp_date.parse::<i64>() {
-                        let exp_date = DateTime::from_timestamp(exp_timestamp, 0)
-                            .unwrap_or_else(Utc::now);
+                        let exp_date =
+                            DateTime::from_timestamp(exp_timestamp, 0).unwrap_or_else(Utc::now);
                         format!("Expires: {}", exp_date.format("%Y-%m-%d %H:%M:%S UTC"))
                     } else {
                         format!("Expires: {}", user_info.exp_date)
                     };
-                    
+
                     info!("Connected! {}", expires_msg);
 
                     // Warm the cache on first connection
@@ -276,9 +276,9 @@ impl MenuSystem {
                 .current_api
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
-            
+
             let favourites = api.cache_manager.get_favourites(&api.provider_hash).await?;
-            
+
             if favourites.is_empty() {
                 println!("No favourites yet. Browse Live TV to add some!");
                 println!("Press Enter to continue...");
@@ -296,8 +296,11 @@ impl MenuSystem {
                 last_selected_index = favourite_options.len().saturating_sub(1);
             }
 
-            let mut select = Select::new("Select favourite to play or manage:", favourite_options.clone())
-                .with_page_size(self.page_size);
+            let mut select = Select::new(
+                "Select favourite to play or manage:",
+                favourite_options.clone(),
+            )
+            .with_page_size(self.page_size);
 
             select = select.with_starting_cursor(last_selected_index);
             let selection = select.prompt_skippable()?;
@@ -336,15 +339,16 @@ impl MenuSystem {
                             .current_api
                             .as_mut()
                             .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
-                        
-                        api_mut.cache_manager
+
+                        api_mut
+                            .cache_manager
                             .remove_favourite(
                                 &api_mut.provider_hash,
                                 selected_favourite.stream_id,
                                 &selected_favourite.stream_type,
                             )
                             .await?;
-                        
+
                         println!("Removed '{}' from favourites", selected_favourite.name);
                         // Continue loop to reload favourites
                     }
@@ -448,11 +452,14 @@ impl MenuSystem {
                 .current_api
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
-            api.cache_manager.get_favourites(&api.provider_hash).await.unwrap_or_default()
+            api.cache_manager
+                .get_favourites(&api.provider_hash)
+                .await
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
-        
+
         let favourite_stream_ids: std::collections::HashSet<u32> = favourites
             .iter()
             .filter(|f| f.stream_type == stream_type)
@@ -460,7 +467,7 @@ impl MenuSystem {
             .collect();
 
         // Create stream display options and maintain mapping for de-duplicated movies
-        let (stream_options, display_to_stream_map): (Vec<String>, HashMap<String, usize>) = 
+        let (stream_options, display_to_stream_map): (Vec<String>, HashMap<String, usize>) =
             if category_id.is_none() || category_id == Some("all") {
                 // For "All" category, include category names in brackets
                 let category_map = match stream_type {
@@ -470,7 +477,8 @@ impl MenuSystem {
                             .as_mut()
                             .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
                         let categories = api.get_live_categories().await?;
-                        categories.into_iter()
+                        categories
+                            .into_iter()
                             .map(|cat| (cat.category_id, cat.category_name))
                             .collect::<HashMap<String, String>>()
                     }
@@ -480,30 +488,34 @@ impl MenuSystem {
                             .as_mut()
                             .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
                         let categories = api.get_vod_categories().await?;
-                        categories.into_iter()
+                        categories
+                            .into_iter()
                             .map(|cat| (cat.category_id, cat.category_name))
                             .collect::<HashMap<String, String>>()
                     }
                     _ => HashMap::new(),
                 };
-                
+
                 if stream_type == "movie" {
                     // For movies, de-duplicate by stream_id and collect all categories
                     let mut movie_map: HashMap<u32, (String, Vec<String>, usize)> = HashMap::new();
-                    
+
                     for (index, stream) in streams.iter().enumerate() {
-                        let category_name = category_map.get(&stream.category_id)
-                            .cloned()
+                        let category_name = stream
+                            .category_id
+                            .as_ref()
+                            .and_then(|id| category_map.get(id).cloned())
                             .unwrap_or_else(|| "Unknown".to_string());
-                        
-                        movie_map.entry(stream.stream_id)
+
+                        movie_map
+                            .entry(stream.stream_id)
                             .and_modify(|(_, categories, _)| categories.push(category_name.clone()))
                             .or_insert_with(|| (stream.name.clone(), vec![category_name], index));
                     }
-                    
+
                     let mut options = Vec::new();
                     let mut mapping = HashMap::new();
-                    
+
                     for (name, categories, first_index) in movie_map.values() {
                         let display_name = if categories.is_empty() {
                             name.clone()
@@ -513,42 +525,57 @@ impl MenuSystem {
                         mapping.insert(display_name.clone(), *first_index);
                         options.push(display_name);
                     }
-                    
+
                     (options, mapping)
                 } else {
                     // For live streams, show individual streams with their category and favourite indicator
-                    let options: Vec<String> = streams.iter().map(|stream| {
+                    let options: Vec<String> = streams
+                        .iter()
+                        .map(|stream| {
+                            let fav_indicator = if favourite_stream_ids.contains(&stream.stream_id)
+                            {
+                                "⭐ "
+                            } else {
+                                ""
+                            };
+
+                            if let Some(category_name) = stream
+                                .category_id
+                                .as_ref()
+                                .and_then(|id| category_map.get(id))
+                            {
+                                format!("{}{} [{}]", fav_indicator, stream.name, category_name)
+                            } else {
+                                format!("{}{}", fav_indicator, stream.name)
+                            }
+                        })
+                        .collect();
+
+                    // Create 1:1 mapping for non-deduplicated streams
+                    let mapping = options
+                        .iter()
+                        .enumerate()
+                        .map(|(index, name)| (name.clone(), index))
+                        .collect();
+
+                    (options, mapping)
+                }
+            } else {
+                // For specific categories, show stream names with favourite indicator
+                let options: Vec<String> = streams
+                    .iter()
+                    .map(|stream| {
                         let fav_indicator = if favourite_stream_ids.contains(&stream.stream_id) {
                             "⭐ "
                         } else {
                             ""
                         };
-                        
-                        if let Some(category_name) = category_map.get(&stream.category_id) {
-                            format!("{}{} [{}]", fav_indicator, stream.name, category_name)
-                        } else {
-                            format!("{}{}", fav_indicator, stream.name)
-                        }
-                    }).collect();
-                    
-                    // Create 1:1 mapping for non-deduplicated streams
-                    let mapping = options.iter().enumerate()
-                        .map(|(index, name)| (name.clone(), index))
-                        .collect();
-                    
-                    (options, mapping)
-                }
-            } else {
-                // For specific categories, show stream names with favourite indicator
-                let options: Vec<String> = streams.iter().map(|stream| {
-                    let fav_indicator = if favourite_stream_ids.contains(&stream.stream_id) {
-                        "⭐ "
-                    } else {
-                        ""
-                    };
-                    format!("{}{}", fav_indicator, stream.name)
-                }).collect();
-                let mapping = options.iter().enumerate()
+                        format!("{}{}", fav_indicator, stream.name)
+                    })
+                    .collect();
+                let mapping = options
+                    .iter()
+                    .enumerate()
                     .map(|(index, name)| (name.clone(), index))
                     .collect();
                 (options, mapping)
@@ -587,30 +614,32 @@ impl MenuSystem {
                     .unwrap_or(display_index);
 
                 let selected_stream = &streams[stream_index];
-                
+
                 // Check if stream is already a favourite
                 let api = self
                     .current_api
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
-                
-                let is_fav = api.cache_manager.is_favourite(&api.provider_hash, selected_stream.stream_id, stream_type).await;
-                
+
+                let is_fav = api
+                    .cache_manager
+                    .is_favourite(&api.provider_hash, selected_stream.stream_id, stream_type)
+                    .await;
+
                 // Show action menu
                 let mut actions = vec!["▶ Play Stream"];
-                if stream_type == "live" {  // Only allow favourites for live streams for now
+                if stream_type == "live" {
+                    // Only allow favourites for live streams for now
                     if is_fav {
                         actions.push("🗑 Remove from Favourites");
                     } else {
                         actions.push("⭐ Add to Favourites");
                     }
                 }
-                
-                let action_selection = Select::new(
-                    &format!("Action for '{}':", selected_stream.name),
-                    actions,
-                )
-                .prompt_skippable()?;
+
+                let action_selection =
+                    Select::new(&format!("Action for '{}':", selected_stream.name), actions)
+                        .prompt_skippable()?;
 
                 match action_selection {
                     Some("▶ Play Stream") => {
@@ -625,23 +654,24 @@ impl MenuSystem {
                             .current_api
                             .as_mut()
                             .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
-                        
+
                         use crate::xtream_api::FavouriteStream;
                         use chrono::Utc;
-                        
+
                         let favourite = FavouriteStream {
                             stream_id: selected_stream.stream_id,
                             name: selected_stream.name.clone(),
                             stream_type: stream_type.to_string(),
                             provider_hash: api_mut.provider_hash.clone(),
                             added_date: Utc::now(),
-                            category_id: Some(selected_stream.category_id.clone()),
+                            category_id: selected_stream.category_id.clone(),
                         };
-                        
-                        api_mut.cache_manager
+
+                        api_mut
+                            .cache_manager
                             .add_favourite(&api_mut.provider_hash, favourite)
                             .await?;
-                        
+
                         println!("Added '{}' to favourites!", selected_stream.name);
                     }
                     Some("🗑 Remove from Favourites") => {
@@ -649,15 +679,16 @@ impl MenuSystem {
                             .current_api
                             .as_mut()
                             .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
-                        
-                        api_mut.cache_manager
+
+                        api_mut
+                            .cache_manager
                             .remove_favourite(
                                 &api_mut.provider_hash,
                                 selected_stream.stream_id,
                                 stream_type,
                             )
                             .await?;
-                        
+
                         println!("Removed '{}' from favourites", selected_stream.name);
                     }
                     _ => {} // Back/Cancel

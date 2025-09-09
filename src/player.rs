@@ -36,7 +36,8 @@ impl Player {
         if !status.success() {
             eprintln!("Player exited with error code: {}", status);
             return Err(anyhow::anyhow!(
-                "Player process failed with exit code: {}", status
+                "Player process failed with exit code: {}",
+                status
             ));
         }
 
@@ -57,12 +58,15 @@ impl Player {
 
         // Detach from terminal - redirect stdout/stderr to null for true background execution
         cmd.stdout(Stdio::null())
-           .stderr(Stdio::null())
-           .stdin(Stdio::null());
+            .stderr(Stdio::null())
+            .stdin(Stdio::null());
 
         // Start the process in background and detach
         cmd.spawn().with_context(|| {
-            format!("Failed to start player in background: {}", self.config.command)
+            format!(
+                "Failed to start player in background: {}",
+                self.config.command
+            )
         })?;
 
         Ok(())

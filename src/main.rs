@@ -6,9 +6,9 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
-use iptv::{Config, MenuSystem, Player};
 use iptv::config::ProviderConfig;
-use iptv::xtream_api::{XTreamAPI, FavouriteStream};
+use iptv::xtream_api::{FavouriteStream, XTreamAPI};
+use iptv::{Config, MenuSystem, Player};
 use std::process::{Command, Stdio};
 
 #[derive(Parser)]
@@ -33,7 +33,6 @@ enum Commands {
     /// Launch rofi menu with favourites
     Rofi,
 }
-
 
 async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result<()> {
     if providers.is_empty() {
@@ -61,14 +60,17 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
         provider_name: Option<String>,
         provider_config: ProviderConfig,
     }
-    
+
     let mut all_favourites = Vec::new();
-    
+
     println!("Loading favourites from {} provider(s)...", providers.len());
-    
+
     for provider in &providers {
-        println!("Connecting to provider: {}", provider.name.as_ref().unwrap_or(&provider.url));
-        
+        println!(
+            "Connecting to provider: {}",
+            provider.name.as_ref().unwrap_or(&provider.url)
+        );
+
         let api = XTreamAPI::new(
             provider.url.clone(),
             provider.username.clone(),
@@ -76,31 +78,41 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
             3600, // Default cache TTL
             provider.name.clone(),
         )?;
-        
+
         // Get favourites from this provider's cache
         let provider_favourites = match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            api.cache_manager.get_favourites(&api.provider_hash)
-        ).await {
+            api.cache_manager.get_favourites(&api.provider_hash),
+        )
+        .await
+        {
             Ok(Ok(favs)) => {
                 if !favs.is_empty() {
-                    println!("Loaded {} favourites from {}", favs.len(), 
-                             provider.name.as_ref().unwrap_or(&provider.url));
+                    println!(
+                        "Loaded {} favourites from {}",
+                        favs.len(),
+                        provider.name.as_ref().unwrap_or(&provider.url)
+                    );
                 }
                 favs
             }
             Ok(Err(e)) => {
-                println!("Error loading favourites from {}: {}", 
-                         provider.name.as_ref().unwrap_or(&provider.url), e);
+                println!(
+                    "Error loading favourites from {}: {}",
+                    provider.name.as_ref().unwrap_or(&provider.url),
+                    e
+                );
                 Vec::new()
             }
             Err(_) => {
-                println!("Timeout loading favourites from {}", 
-                         provider.name.as_ref().unwrap_or(&provider.url));
+                println!(
+                    "Timeout loading favourites from {}",
+                    provider.name.as_ref().unwrap_or(&provider.url)
+                );
                 Vec::new()
             }
         };
-        
+
         // Store favourites with their provider info
         for favourite in provider_favourites {
             all_favourites.push(FavouriteWithProvider {
@@ -110,9 +122,9 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
             });
         }
     }
-    
+
     let favourites = all_favourites;
-    
+
     if favourites.is_empty() {
         println!("No favourites found. Use the interactive menu to add favourites first.");
         return Ok(());
@@ -122,10 +134,15 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
     let mut rofi_input = String::new();
     for fav_with_provider in &favourites {
         // Include provider name for clarity when multiple providers have favourites
-        let provider_name = fav_with_provider.provider_name.as_ref()
+        let provider_name = fav_with_provider
+            .provider_name
+            .as_ref()
             .map(|name| format!(" [{}]", name))
             .unwrap_or_default();
-        rofi_input.push_str(&format!("{}{}\n", fav_with_provider.favourite.name, provider_name));
+        rofi_input.push_str(&format!(
+            "{}{}\n",
+            fav_with_provider.favourite.name, provider_name
+        ));
     }
 
     // Launch rofi to select a favourite
@@ -133,8 +150,10 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
     rofi_cmd
         .arg("-dmenu")
         .arg("-hover-select")
-        .arg("-me-select-entry").arg("")
-        .arg("-me-accept-entry").arg("MousePrimary")
+        .arg("-me-select-entry")
+        .arg("")
+        .arg("-me-accept-entry")
+        .arg("MousePrimary")
         .arg("-i") // case insensitive
         .arg("-p")
         .arg("Select favourite stream:")
@@ -143,7 +162,7 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
         .stderr(Stdio::piped());
 
     let mut rofi_process = rofi_cmd.spawn()?;
-    
+
     // Write favourites to rofi's stdin
     if let Some(stdin) = rofi_process.stdin.as_mut() {
         use std::io::Write;
@@ -151,7 +170,7 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
     }
 
     let output = rofi_process.wait_with_output()?;
-    
+
     if !output.status.success() {
         // Check if there's stderr output to help debug
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -164,21 +183,23 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
     }
 
     let selected_display = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    
+
     // Find the selected favourite by matching the display name
     let mut selected_item = None;
     for fav_with_provider in &favourites {
-        let provider_name = fav_with_provider.provider_name.as_ref()
+        let provider_name = fav_with_provider
+            .provider_name
+            .as_ref()
             .map(|name| format!(" [{}]", name))
             .unwrap_or_default();
         let display_name = format!("{}{}", fav_with_provider.favourite.name, provider_name);
-        
+
         if display_name == selected_display {
             selected_item = Some(fav_with_provider);
             break;
         }
     }
-    
+
     if let Some(selected_item) = selected_item {
         // Create API for the selected provider to get stream URL
         let api = XTreamAPI::new(
@@ -188,15 +209,15 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
             3600, // Default cache TTL
             selected_item.provider_config.name.clone(),
         )?;
-        
+
         // Get the stream URL and start playing in background
         let stream_url = api.get_stream_url(
-            selected_item.favourite.stream_id, 
-            &selected_item.favourite.stream_type, 
-            None
+            selected_item.favourite.stream_id,
+            &selected_item.favourite.stream_type,
+            None,
         );
         println!("Starting: {}", selected_item.favourite.name);
-        
+
         // Start mpv in background and exit immediately
         player.play_background(&stream_url)?;
         println!("Player started in background");

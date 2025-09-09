@@ -327,8 +327,18 @@ impl CacheManager {
         Ok(())
     }
 
-    pub async fn get_favourites(&self, provider_hash: &str) -> Result<Vec<crate::xtream_api::FavouriteStream>> {
-        match self.get_cached::<Vec<crate::xtream_api::FavouriteStream>>(provider_hash, "favourites", None).await {
+    pub async fn get_favourites(
+        &self,
+        provider_hash: &str,
+    ) -> Result<Vec<crate::xtream_api::FavouriteStream>> {
+        match self
+            .get_cached::<Vec<crate::xtream_api::FavouriteStream>>(
+                provider_hash,
+                "favourites",
+                None,
+            )
+            .await
+        {
             Ok(Some(cached)) => Ok(cached.data),
             Ok(None) => Ok(Vec::new()),
             Err(_) => Ok(Vec::new()),
@@ -341,14 +351,18 @@ impl CacheManager {
         favourite: crate::xtream_api::FavouriteStream,
     ) -> Result<()> {
         let mut favourites = self.get_favourites(provider_hash).await?;
-        
+
         // Check if already exists
-        if !favourites.iter().any(|f| f.stream_id == favourite.stream_id && f.stream_type == favourite.stream_type) {
+        if !favourites
+            .iter()
+            .any(|f| f.stream_id == favourite.stream_id && f.stream_type == favourite.stream_type)
+        {
             favourites.push(favourite);
             let metadata = CacheMetadata::new("".to_string(), None, u64::MAX); // Never expire favourites
-            self.store_cache(provider_hash, "favourites", None, favourites, metadata).await?;
+            self.store_cache(provider_hash, "favourites", None, favourites, metadata)
+                .await?;
         }
-        
+
         Ok(())
     }
 
@@ -360,16 +374,24 @@ impl CacheManager {
     ) -> Result<()> {
         let mut favourites = self.get_favourites(provider_hash).await?;
         favourites.retain(|f| !(f.stream_id == stream_id && f.stream_type == stream_type));
-        
+
         let metadata = CacheMetadata::new("".to_string(), None, u64::MAX); // Never expire favourites
-        self.store_cache(provider_hash, "favourites", None, favourites, metadata).await?;
-        
+        self.store_cache(provider_hash, "favourites", None, favourites, metadata)
+            .await?;
+
         Ok(())
     }
 
-    pub async fn is_favourite(&self, provider_hash: &str, stream_id: u32, stream_type: &str) -> bool {
+    pub async fn is_favourite(
+        &self,
+        provider_hash: &str,
+        stream_id: u32,
+        stream_type: &str,
+    ) -> bool {
         match self.get_favourites(provider_hash).await {
-            Ok(favourites) => favourites.iter().any(|f| f.stream_id == stream_id && f.stream_type == stream_type),
+            Ok(favourites) => favourites
+                .iter()
+                .any(|f| f.stream_id == stream_id && f.stream_type == stream_type),
             Err(_) => false,
         }
     }
