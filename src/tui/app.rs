@@ -229,41 +229,39 @@ impl App {
                 }
                 _ => {}
             },
-            AppState::StreamSelection(content_type, _category) => {
-                match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
-                    KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
-                    KeyCode::PageUp => self.move_selection_page_up(),
-                    KeyCode::PageDown => self.move_selection_page_down(),
-                    KeyCode::Home => self.move_selection_home(),
-                    KeyCode::End => self.move_selection_end(),
-                    KeyCode::Char('f') => {
-                        if self.selected_index < self.streams.len() {
-                            let stream = self.streams[self.selected_index].clone();
-                            self.toggle_favourite_stream(&stream).await;
-                        }
+            AppState::StreamSelection(content_type, _category) => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
+                KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                KeyCode::PageUp => self.move_selection_page_up(),
+                KeyCode::PageDown => self.move_selection_page_down(),
+                KeyCode::Home => self.move_selection_home(),
+                KeyCode::End => self.move_selection_end(),
+                KeyCode::Char('f') => {
+                    if self.selected_index < self.streams.len() {
+                        let stream = self.streams[self.selected_index].clone();
+                        self.toggle_favourite_stream(&stream).await;
                     }
-                    KeyCode::Enter => {
-                        if self.selected_index < self.streams.len() {
-                            let stream = self.streams[self.selected_index].clone();
-                            match content_type {
-                                ContentType::Series => {
-                                    self.load_seasons(stream).await;
-                                }
-                                _ => {
-                                    self.play_stream(&stream).await;
-                                }
+                }
+                KeyCode::Enter => {
+                    if self.selected_index < self.streams.len() {
+                        let stream = self.streams[self.selected_index].clone();
+                        match content_type {
+                            ContentType::Series => {
+                                self.load_seasons(stream).await;
+                            }
+                            _ => {
+                                self.play_stream(&stream).await;
                             }
                         }
                     }
-                    KeyCode::Esc | KeyCode::Char('b') => {
-                        self.state = AppState::CategorySelection(content_type.clone());
-                        self.selected_index = 0;
-                        self.scroll_offset = 0;
-                    }
-                    _ => {}
                 }
-            }
+                KeyCode::Esc | KeyCode::Char('b') => {
+                    self.state = AppState::CategorySelection(content_type.clone());
+                    self.selected_index = 0;
+                    self.scroll_offset = 0;
+                }
+                _ => {}
+            },
             AppState::SeasonSelection(series) => match key.code {
                 KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
                 KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
@@ -539,7 +537,7 @@ impl App {
                         parent_id: None,
                     };
                     categories.insert(0, all_category);
-                    
+
                     self.categories = categories;
                     self.items = self
                         .categories
@@ -577,61 +575,65 @@ impl App {
             } else {
                 Some(category.category_id.as_str())
             };
-            
+
             let result = match content_type {
                 ContentType::Live => api.get_live_streams(category_id).await,
                 ContentType::Movies => api.get_vod_streams(category_id).await,
-                ContentType::Series => {
-                    api.get_series(category_id)
-                        .await
-                        .map(|series_infos| {
-                            series_infos
-                                .into_iter()
-                                .map(|info| Stream {
-                                    num: info.num,
-                                    name: info.name.clone(),
-                                    stream_type: "series".to_string(),
-                                    stream_id: info.series_id,
-                                    stream_icon: info.cover.clone(),
-                                    epg_channel_id: None,
-                                    added: None,
-                                    category_id: info.category_id.clone(),
-                                    category_ids: None,
-                                    custom_sid: None,
-                                    tv_archive: None,
-                                    direct_source: None,
-                                    tv_archive_duration: None,
-                                    is_adult: None,
-                                    container_extension: None,
-                                    rating: None,
-                                    rating_5based: None,
-                                })
-                                .collect()
+                ContentType::Series => api.get_series(category_id).await.map(|series_infos| {
+                    series_infos
+                        .into_iter()
+                        .map(|info| Stream {
+                            num: info.num,
+                            name: info.name.clone(),
+                            stream_type: "series".to_string(),
+                            stream_id: info.series_id,
+                            stream_icon: info.cover.clone(),
+                            epg_channel_id: None,
+                            added: None,
+                            category_id: info.category_id.clone(),
+                            category_ids: None,
+                            custom_sid: None,
+                            tv_archive: None,
+                            direct_source: None,
+                            tv_archive_duration: None,
+                            is_adult: None,
+                            container_extension: None,
+                            rating: None,
+                            rating_5based: None,
                         })
-                }
+                        .collect()
+                }),
             };
 
             match result {
                 Ok(streams) => {
                     self.streams = streams;
-                    
+
                     // Get list of favourites to mark them with a star
                     let favourites = if let Some(api) = &self.current_api {
-                        api.cache_manager.get_favourites(&api.provider_hash).await.unwrap_or_default()
+                        api.cache_manager
+                            .get_favourites(&api.provider_hash)
+                            .await
+                            .unwrap_or_default()
                     } else {
                         Vec::new()
                     };
-                    
+
                     // Create item list with stars for favourites
-                    self.items = self.streams.iter().map(|s| {
-                        let is_favourite = favourites.iter().any(|f| f.stream_id == s.stream_id);
-                        if is_favourite {
-                            format!("⭐ {}", s.name)
-                        } else {
-                            s.name.clone()
-                        }
-                    }).collect();
-                    
+                    self.items = self
+                        .streams
+                        .iter()
+                        .map(|s| {
+                            let is_favourite =
+                                favourites.iter().any(|f| f.stream_id == s.stream_id);
+                            if is_favourite {
+                                format!("⭐ {}", s.name)
+                            } else {
+                                s.name.clone()
+                            }
+                        })
+                        .collect();
+
                     self.reset_filter();
                     self.state = AppState::StreamSelection(content_type, category);
                     self.selected_index = 0;
@@ -761,18 +763,21 @@ impl App {
     async fn toggle_favourite_stream(&mut self, stream: &Stream) {
         if let Some(api) = &self.current_api {
             // Check if this stream is already a favourite
-            let favourites = api.cache_manager.get_favourites(&api.provider_hash).await.unwrap_or_default();
+            let favourites = api
+                .cache_manager
+                .get_favourites(&api.provider_hash)
+                .await
+                .unwrap_or_default();
             let is_favourite = favourites.iter().any(|f| f.stream_id == stream.stream_id);
-            
+
             if is_favourite {
                 // Remove from favourites
-                let _ = api.cache_manager.remove_favourite(
-                    &api.provider_hash, 
-                    stream.stream_id, 
-                    &stream.stream_type
-                ).await;
+                let _ = api
+                    .cache_manager
+                    .remove_favourite(&api.provider_hash, stream.stream_id, &stream.stream_type)
+                    .await;
                 self.add_log(format!("Removed {} from favourites", stream.name));
-                
+
                 // Update the display to show the star is removed
                 if let Some(item) = self.items.get_mut(self.selected_index) {
                     if item.starts_with("⭐ ") {
@@ -789,10 +794,13 @@ impl App {
                     added_date: chrono::Utc::now(),
                     category_id: stream.category_id.clone(),
                 };
-                
-                let _ = api.cache_manager.add_favourite(&api.provider_hash, favourite).await;
+
+                let _ = api
+                    .cache_manager
+                    .add_favourite(&api.provider_hash, favourite)
+                    .await;
                 self.add_log(format!("Added {} to favourites", stream.name));
-                
+
                 // Update the display to show the star
                 if let Some(item) = self.items.get_mut(self.selected_index) {
                     if !item.starts_with("⭐ ") {
