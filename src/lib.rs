@@ -3,6 +3,7 @@
 
 pub mod cache;
 pub mod config;
+pub mod favourites;
 pub mod menu;
 pub mod player;
 pub mod tui;
@@ -10,6 +11,7 @@ pub mod xtream_api;
 
 pub use cache::CacheManager;
 pub use config::Config;
+pub use favourites::FavouritesManager;
 pub use menu::MenuSystem;
 pub use player::Player;
 pub use xtream_api::XTreamAPI;

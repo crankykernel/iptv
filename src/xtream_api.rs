@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
 use crate::cache::{CacheManager, CacheMetadata};
+use crate::favourites::FavouritesManager;
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
@@ -428,6 +429,7 @@ pub struct XTreamAPI {
     password: String,
     provider_name: Option<String>,
     pub cache_manager: CacheManager,
+    pub favourites_manager: FavouritesManager,
     pub provider_hash: String,
 }
 
@@ -457,6 +459,7 @@ impl XTreamAPI {
 
         let mut cache_manager = CacheManager::new()?;
         let provider_hash = cache_manager.get_provider_hash(&base_url, provider_name.as_deref())?;
+        let favourites_manager = FavouritesManager::new()?;
 
         Ok(Self {
             client: Client::builder()
@@ -468,6 +471,7 @@ impl XTreamAPI {
             password,
             provider_name,
             cache_manager,
+            favourites_manager,
             provider_hash,
         })
     }

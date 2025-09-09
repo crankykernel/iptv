@@ -276,7 +276,7 @@ impl MenuSystem {
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
 
-            let favourites = api.cache_manager.get_favourites(&api.provider_hash).await?;
+            let favourites = api.favourites_manager.get_favourites(&api.provider_hash)?;
 
             if favourites.is_empty() {
                 println!("No favourites yet. Browse Live TV to add some!");
@@ -339,14 +339,11 @@ impl MenuSystem {
                             .as_mut()
                             .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
 
-                        api_mut
-                            .cache_manager
-                            .remove_favourite(
-                                &api_mut.provider_hash,
-                                selected_favourite.stream_id,
-                                &selected_favourite.stream_type,
-                            )
-                            .await?;
+                        api_mut.favourites_manager.remove_favourite(
+                            &api_mut.provider_hash,
+                            selected_favourite.stream_id,
+                            &selected_favourite.stream_type,
+                        )?;
 
                         println!("Removed '{}' from favourites", selected_favourite.name);
                         // Continue loop to reload favourites
@@ -451,9 +448,8 @@ impl MenuSystem {
                 .current_api
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
-            api.cache_manager
+            api.favourites_manager
                 .get_favourites(&api.provider_hash)
-                .await
                 .unwrap_or_default()
         } else {
             Vec::new()
@@ -632,10 +628,11 @@ impl MenuSystem {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
 
-                    let is_fav = api
-                        .cache_manager
-                        .is_favourite(&api.provider_hash, selected_stream.stream_id, stream_type)
-                        .await;
+                    let is_fav = api.favourites_manager.is_favourite(
+                        &api.provider_hash,
+                        selected_stream.stream_id,
+                        stream_type,
+                    )?;
 
                     // Show action menu
                     let mut actions = vec!["▶ Play Stream"];
@@ -680,9 +677,8 @@ impl MenuSystem {
                             };
 
                             api_mut
-                                .cache_manager
-                                .add_favourite(&api_mut.provider_hash, favourite)
-                                .await?;
+                                .favourites_manager
+                                .add_favourite(&api_mut.provider_hash, favourite)?;
 
                             println!("Added '{}' to favourites!", selected_stream.name);
                         }
@@ -692,14 +688,11 @@ impl MenuSystem {
                                 .as_mut()
                                 .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
 
-                            api_mut
-                                .cache_manager
-                                .remove_favourite(
-                                    &api_mut.provider_hash,
-                                    selected_stream.stream_id,
-                                    stream_type,
-                                )
-                                .await?;
+                            api_mut.favourites_manager.remove_favourite(
+                                &api_mut.provider_hash,
+                                selected_stream.stream_id,
+                                stream_type,
+                            )?;
 
                             println!("Removed '{}' from favourites", selected_stream.name);
                         }

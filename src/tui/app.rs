@@ -611,9 +611,8 @@ impl App {
 
                     // Get list of favourites to mark them with a star
                     let favourites = if let Some(api) = &self.current_api {
-                        api.cache_manager
+                        api.favourites_manager
                             .get_favourites(&api.provider_hash)
-                            .await
                             .unwrap_or_default()
                     } else {
                         Vec::new()
@@ -737,7 +736,7 @@ impl App {
         self.add_log("Loading favourites".to_string());
 
         if let Some(api) = &mut self.current_api {
-            match api.cache_manager.get_favourites(&api.provider_hash).await {
+            match api.favourites_manager.get_favourites(&api.provider_hash) {
                 Ok(favs) => {
                     self.favourites = favs;
                     self.items = self
@@ -764,18 +763,18 @@ impl App {
         if let Some(api) = &self.current_api {
             // Check if this stream is already a favourite
             let favourites = api
-                .cache_manager
+                .favourites_manager
                 .get_favourites(&api.provider_hash)
-                .await
                 .unwrap_or_default();
             let is_favourite = favourites.iter().any(|f| f.stream_id == stream.stream_id);
 
             if is_favourite {
                 // Remove from favourites
-                let _ = api
-                    .cache_manager
-                    .remove_favourite(&api.provider_hash, stream.stream_id, &stream.stream_type)
-                    .await;
+                let _ = api.favourites_manager.remove_favourite(
+                    &api.provider_hash,
+                    stream.stream_id,
+                    &stream.stream_type,
+                );
                 self.add_log(format!("Removed {} from favourites", stream.name));
 
                 // Update the display to show the star is removed
@@ -796,9 +795,8 @@ impl App {
                 };
 
                 let _ = api
-                    .cache_manager
-                    .add_favourite(&api.provider_hash, favourite)
-                    .await;
+                    .favourites_manager
+                    .add_favourite(&api.provider_hash, favourite);
                 self.add_log(format!("Added {} to favourites", stream.name));
 
                 // Update the display to show the star
@@ -815,10 +813,11 @@ impl App {
         if index < self.favourites.len() {
             if let Some(api) = &self.current_api {
                 let fav = &self.favourites[index];
-                let _ = api
-                    .cache_manager
-                    .remove_favourite(&api.provider_hash, fav.stream_id, &fav.stream_type)
-                    .await;
+                let _ = api.favourites_manager.remove_favourite(
+                    &api.provider_hash,
+                    fav.stream_id,
+                    &fav.stream_type,
+                );
                 self.add_log(format!("Removed {} from favourites", fav.name));
 
                 self.favourites.remove(index);

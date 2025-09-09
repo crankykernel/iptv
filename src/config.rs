@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -65,6 +65,32 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Get the default config directory path (~/.config/iptv)
+    pub fn default_config_dir() -> Option<PathBuf> {
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config").join("iptv"))
+    }
+
+    /// Get the default config file path (~/.config/iptv/config.toml)
+    pub fn default_config_path() -> Option<PathBuf> {
+        Self::default_config_dir().map(|dir| dir.join("config.toml"))
+    }
+
+    /// Ensure the config directory exists
+    pub fn ensure_config_dir() -> Result<PathBuf> {
+        let config_dir = Self::default_config_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
+
+        if !config_dir.exists() {
+            fs::create_dir_all(&config_dir).with_context(|| {
+                format!(
+                    "Failed to create config directory: {}",
+                    config_dir.display()
+                )
+            })?;
+        }
+
+        Ok(config_dir)
+    }
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = fs::read_to_string(&path)
             .with_context(|| format!("Failed to read config file: {}", path.as_ref().display()))?;

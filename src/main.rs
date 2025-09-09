@@ -82,14 +82,9 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
             provider.name.clone(),
         )?;
 
-        // Get favourites from this provider's cache
-        let provider_favourites = match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            api.cache_manager.get_favourites(&api.provider_hash),
-        )
-        .await
-        {
-            Ok(Ok(favs)) => {
+        // Get favourites from this provider using the new favourites manager
+        let provider_favourites = match api.favourites_manager.get_favourites(&api.provider_hash) {
+            Ok(favs) => {
                 if !favs.is_empty() {
                     println!(
                         "Loaded {} favourites from {}",
@@ -99,18 +94,11 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
                 }
                 favs
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 println!(
                     "Error loading favourites from {}: {}",
                     provider.name.as_ref().unwrap_or(&provider.url),
                     e
-                );
-                Vec::new()
-            }
-            Err(_) => {
-                println!(
-                    "Timeout loading favourites from {}",
-                    provider.name.as_ref().unwrap_or(&provider.url)
                 );
                 Vec::new()
             }
@@ -259,27 +247,31 @@ async fn main() -> Result<()> {
             return local_config;
         }
 
-        // Fallback to ~/.config/iptv.toml
-        if let Some(home_dir) = std::env::var_os("HOME") {
-            let user_config = PathBuf::from(home_dir).join(".config").join("iptv.toml");
-
-            if user_config.exists() {
-                return user_config;
+        // Check for ~/.config/iptv/config.toml
+        if let Some(config_path) = Config::default_config_path() {
+            if config_path.exists() {
+                return config_path;
             }
         }
 
-        // Default to current directory if neither exists
-        local_config
+        // Default to new location
+        Config::default_config_path().unwrap_or(local_config)
     });
 
     // Load configuration
     let config = if config_path.exists() {
         Config::load(&config_path)?
     } else {
+        // Ensure config directory exists for new location
+        let _ = Config::ensure_config_dir();
+
         eprintln!("Config file not found at: {}", config_path.display());
-        eprintln!("Also checked: ~/.config/iptv.toml");
+        eprintln!("Expected locations:");
+        eprintln!("  1. ./config.toml (current directory)");
+        eprintln!("  2. ~/.config/iptv/config.toml (recommended)");
+        eprintln!();
         eprintln!("Creating example config at: config.example.toml");
-        eprintln!("Please copy and edit it to config.toml");
+        eprintln!("Please copy and edit it to one of the locations above");
 
         let example_config = Config::default();
         example_config.save("config.example.toml")?;
