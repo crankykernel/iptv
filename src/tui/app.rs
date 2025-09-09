@@ -4,7 +4,7 @@
 use crate::config::ProviderConfig;
 use crate::menu::ContentType;
 use crate::player::Player;
-use crate::xtream_api::{ApiEpisode, Category, FavouriteStream, Stream, XTreamAPI};
+use crate::xtream_api::{ApiEpisode, Category, FavouriteStream, Stream, VodInfoResponse, XTreamAPI};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -23,6 +23,7 @@ pub enum AppState {
     MainMenu,
     CategorySelection(ContentType),
     StreamSelection(ContentType, Category),
+    VodInfo(Stream),
     SeasonSelection(Stream),
     EpisodeSelection(Stream, TuiSeason),
     FavouriteSelection,
@@ -62,6 +63,7 @@ pub struct App {
     episodes: Vec<ApiEpisode>,
     favourites: Vec<FavouriteStream>,
     cross_provider_favourites: Vec<(FavouriteStream, ProviderConfig)>,
+    vod_info: Option<VodInfoResponse>,
 }
 
 impl App {
@@ -110,6 +112,7 @@ impl App {
             episodes: Vec::new(),
             favourites: Vec::new(),
             cross_provider_favourites: Vec::new(),
+            vod_info: None,
         }
     }
 
@@ -260,6 +263,10 @@ impl App {
                             ContentType::Series => {
                                 self.load_seasons(stream).await;
                             }
+                            ContentType::Movies => {
+                                // Load VOD info for movies
+                                self.load_vod_info(stream).await;
+                            }
                             _ => {
                                 self.play_stream(&stream).await;
                             }
@@ -268,6 +275,40 @@ impl App {
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
                     self.state = AppState::CategorySelection(content_type.clone());
+                    self.selected_index = 0;
+                    self.scroll_offset = 0;
+                }
+                _ => {}
+            },
+            AppState::VodInfo(ref stream) => match key.code {
+                KeyCode::Enter | KeyCode::Char('p') => {
+                    // Play the movie
+                    self.play_vod_stream(&stream.clone()).await;
+                }
+                KeyCode::Char('u') => {
+                    // Show URL (it's already displayed in the info)
+                    if let Some(api) = &self.current_api {
+                        let extension = self.vod_info.as_ref()
+                            .and_then(|info| Some(info.movie_data.container_extension.as_str()));
+                        let url = api.get_stream_url(stream.stream_id, "movie", extension);
+                        self.add_log(format!("Stream URL: {}", url));
+                        self.status_message = Some(format!("URL copied to logs: {}", url));
+                    }
+                }
+                KeyCode::Esc | KeyCode::Char('b') => {
+                    // Go back to stream selection
+                    if let Some(category) = self.categories.iter().find(|c| 
+                        stream.category_id.as_ref().map_or(false, |id| id == &c.category_id)
+                    ) {
+                        self.state = AppState::StreamSelection(ContentType::Movies, category.clone());
+                    } else {
+                        // Fallback to all movies
+                        self.state = AppState::StreamSelection(ContentType::Movies, Category {
+                            category_id: "all".to_string(),
+                            category_name: "All".to_string(),  
+                            parent_id: None,
+                        });
+                    }
                     self.selected_index = 0;
                     self.scroll_offset = 0;
                 }
@@ -1117,6 +1158,129 @@ impl App {
                 self.add_log("Player started in background window".to_string());
                 self.add_log("Continue browsing while video plays".to_string());
                 // Return to the previous state so user can continue browsing
+                self.state = return_state;
+            }
+        }
+    }
+
+    async fn load_vod_info(&mut self, stream: Stream) {
+        self.state = AppState::Loading(format!("Loading info for: {}", stream.name));
+        self.add_log(format!("Loading VOD info for: {}", stream.name));
+        
+        if let Some(api) = &mut self.current_api {
+            match api.get_vod_info(stream.stream_id).await {
+                Ok(vod_info) => {
+                    self.vod_info = Some(vod_info.clone());
+                    
+                    // Create info display items
+                    let mut items = vec![
+                        format!("📽️ {}", vod_info.info.name),
+                        String::new(),
+                    ];
+                    
+                    if let Some(ref plot) = vod_info.info.plot {
+                        items.push("📝 Description:".to_string());
+                        // Wrap text to ~80 chars
+                        let words = plot.split_whitespace();
+                        let mut current_line = String::new();
+                        for word in words {
+                            if current_line.len() + word.len() + 1 > 80 {
+                                items.push(format!("   {}", current_line));
+                                current_line = word.to_string();
+                            } else {
+                                if !current_line.is_empty() {
+                                    current_line.push(' ');
+                                }
+                                current_line.push_str(word);
+                            }
+                        }
+                        if !current_line.is_empty() {
+                            items.push(format!("   {}", current_line));
+                        }
+                        items.push(String::new());
+                    }
+                    
+                    if let Some(ref genre) = vod_info.info.genre {
+                        items.push(format!("🎭 Genre: {}", genre));
+                    }
+                    
+                    if let Some(ref release_date) = vod_info.info.releasedate {
+                        items.push(format!("📅 Release: {}", release_date));
+                    }
+                    
+                    if let Some(ref rating) = vod_info.info.rating {
+                        items.push(format!("⭐ Rating: {}", rating));
+                    }
+                    
+                    if let Some(ref duration) = vod_info.info.duration {
+                        items.push(format!("⏱️ Duration: {}", duration));
+                    }
+                    
+                    if let Some(ref cast) = vod_info.info.cast {
+                        items.push(format!("👥 Cast: {}", cast));
+                    }
+                    
+                    if let Some(ref director) = vod_info.info.director {
+                        items.push(format!("🎬 Director: {}", director));
+                    }
+                    
+                    items.push(String::new());
+                    items.push(format!("📦 Format: {}", vod_info.movie_data.container_extension));
+                    
+                    // Add stream URL
+                    let extension = Some(vod_info.movie_data.container_extension.as_str());
+                    let url = api.get_stream_url(stream.stream_id, "movie", extension);
+                    items.push(String::new());
+                    items.push("🔗 Stream URL:".to_string());
+                    items.push(format!("   {}", url));
+                    
+                    items.push(String::new());
+                    items.push("─────────────────────────────────────".to_string());
+                    items.push("Press ENTER or 'p' to play".to_string());
+                    items.push("Press 'u' to copy URL to logs".to_string());
+                    items.push("Press ESC or 'b' to go back".to_string());
+                    
+                    self.items = items;
+                    self.reset_filter();
+                    self.state = AppState::VodInfo(stream);
+                    self.selected_index = 0;
+                    self.scroll_offset = 0;
+                    
+                    self.add_log(format!("Loaded VOD info for: {}", vod_info.info.name));
+                }
+                Err(e) => {
+                    self.add_log(format!("Failed to load VOD info: {}", e));
+                    // Fallback to direct play
+                    self.play_stream(&stream).await;
+                }
+            }
+        }
+    }
+    
+    async fn play_vod_stream(&mut self, stream: &Stream) {
+        // Store the current state to return to after starting playback
+        let return_state = self.state.clone();
+        
+        self.add_log(format!("Playing: {}", stream.name));
+        
+        if let Some(api) = &self.current_api {
+            // Use the container extension from VOD info if available
+            let extension = self.vod_info.as_ref()
+                .map(|info| info.movie_data.container_extension.as_str());
+            
+            let url = api.get_stream_url(stream.stream_id, "movie", extension);
+            
+            // Log the stream URL
+            self.add_log(format!("Stream URL: {}", url));
+            
+            // Use TUI-specific play method that runs in background
+            if let Err(e) = self.player.play_tui(&url).await {
+                self.state = AppState::Error(format!("Failed to play movie: {}", e));
+                self.add_log(format!("Playback failed: {}", e));
+            } else {
+                self.add_log("Player started in background window".to_string());
+                self.add_log("Continue browsing while video plays".to_string());
+                // Return to the VOD info state so user can see the info
                 self.state = return_state;
             }
         }
