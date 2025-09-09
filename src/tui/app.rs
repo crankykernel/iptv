@@ -826,12 +826,12 @@ impl App {
 
                 // Update filtered_indices after removing item
                 self.filtered_indices = (0..self.items.len()).collect();
-                
+
                 // Adjust selected index if needed
                 if self.selected_index >= self.items.len() && self.selected_index > 0 {
                     self.selected_index -= 1;
                 }
-                
+
                 // Ensure scroll offset is valid
                 if self.scroll_offset > 0 && self.scroll_offset >= self.items.len() {
                     self.scroll_offset = self.items.len().saturating_sub(1);
