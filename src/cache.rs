@@ -7,50 +7,28 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs as async_fs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheMetadata {
     pub created_at: u64,
-    pub ttl_seconds: u64,
     pub provider_url: String,
     pub provider_name: Option<String>,
 }
 
 impl CacheMetadata {
-    pub fn new(provider_url: String, provider_name: Option<String>, ttl_seconds: u64) -> Self {
+    pub fn new(provider_url: String, provider_name: Option<String>) -> Self {
         Self {
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            ttl_seconds,
             provider_url,
             provider_name,
         }
     }
 
-    pub fn is_expired(&self) -> bool {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        now > self.created_at + self.ttl_seconds
-    }
-
-    pub fn time_until_expiry(&self) -> Duration {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let expiry_time = self.created_at + self.ttl_seconds;
-        if now < expiry_time {
-            Duration::from_secs(expiry_time - now)
-        } else {
-            Duration::ZERO
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,10 +40,6 @@ pub struct CachedData<T> {
 impl<T> CachedData<T> {
     pub fn new(data: T, metadata: CacheMetadata) -> Self {
         Self { metadata, data }
-    }
-
-    pub fn is_expired(&self) -> bool {
-        self.metadata.is_expired()
     }
 }
 
@@ -294,18 +268,17 @@ impl CacheManager {
         Fut: std::future::Future<Output = Result<T>>,
     {
         for (cache_type, category_id) in cache_entries {
-            if let Ok(Some(cached)) = self
+            if let Ok(Some(_cached)) = self
                 .get_cached::<T>(provider_hash, &cache_type, category_id.as_deref())
                 .await
             {
-                if !cached.is_expired() {
-                    continue;
-                }
+                // Cache exists, no need to clean
+                continue;
             }
 
             match fetcher(cache_type.clone(), category_id.clone()).await {
                 Ok(data) => {
-                    let metadata = CacheMetadata::new("".to_string(), None, 3600);
+                    let metadata = CacheMetadata::new("".to_string(), None);
                     if let Err(e) = self
                         .store_cache(
                             provider_hash,
@@ -358,7 +331,7 @@ impl CacheManager {
             .any(|f| f.stream_id == favourite.stream_id && f.stream_type == favourite.stream_type)
         {
             favourites.push(favourite);
-            let metadata = CacheMetadata::new("".to_string(), None, u64::MAX); // Never expire favourites
+            let metadata = CacheMetadata::new("".to_string(), None);
             self.store_cache(provider_hash, "favourites", None, favourites, metadata)
                 .await?;
         }
@@ -375,7 +348,7 @@ impl CacheManager {
         let mut favourites = self.get_favourites(provider_hash).await?;
         favourites.retain(|f| !(f.stream_id == stream_id && f.stream_type == stream_type));
 
-        let metadata = CacheMetadata::new("".to_string(), None, u64::MAX); // Never expire favourites
+        let metadata = CacheMetadata::new("".to_string(), None);
         self.store_cache(provider_hash, "favourites", None, favourites, metadata)
             .await?;
 

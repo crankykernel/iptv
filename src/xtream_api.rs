@@ -196,6 +196,58 @@ pub struct SeriesInfo {
     pub tmdb: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Episode {
+    pub id: String,
+    pub episode_num: u32,
+    pub title: String,
+    #[serde(default)]
+    pub container_extension: Option<String>,
+    #[serde(default)]
+    pub info: Option<EpisodeInfo>,
+    #[serde(default)]
+    pub custom_sid: Option<String>,
+    #[serde(default)]
+    pub added: Option<String>,
+    #[serde(default)]
+    pub season: u32,
+    #[serde(default)]
+    pub direct_source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EpisodeInfo {
+    #[serde(default)]
+    pub tmdb_id: Option<u32>,
+    #[serde(default)]
+    pub releasedate: Option<String>,
+    #[serde(default)]
+    pub plot: Option<String>,
+    #[serde(default, rename = "durationSecs")]
+    pub duration_secs: Option<u32>,
+    #[serde(default)]
+    pub duration: Option<String>,
+    #[serde(default)]
+    pub movie_image: Option<String>,
+    #[serde(default)]
+    pub rating: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeriesInfoDetailed {
+    pub info: SeriesInfo,
+    pub seasons: Vec<Season>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Season {
+    #[serde(default)]
+    pub season_number: u32,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub episodes: Vec<Episode>,
+}
+
 #[derive(Debug)]
 pub struct XTreamAPI {
     client: Client,
@@ -380,9 +432,7 @@ impl XTreamAPI {
             .get_cached::<UserInfo>(&self.provider_hash, "user_info", None)
             .await
         {
-            if !cached.is_expired() {
-                return Ok(cached.data);
-            }
+            return Ok(cached.data);
         }
 
         let response: UserInfoResponse = self.make_request("get_user_info", None).await?;
@@ -391,7 +441,6 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            u64::MAX, // Never expire cache
         );
 
         if let Err(e) = self
@@ -417,9 +466,7 @@ impl XTreamAPI {
             .get_cached::<Vec<Category>>(&self.provider_hash, "live_categories", None)
             .await
         {
-            if !cached.is_expired() {
-                return Ok(cached.data);
-            }
+            return Ok(cached.data);
         }
 
         let categories: Vec<Category> = self.make_request("get_live_categories", None).await?;
@@ -427,7 +474,6 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            u64::MAX, // Never expire cache
         );
 
         if let Err(e) = self
@@ -453,9 +499,7 @@ impl XTreamAPI {
             .get_cached::<Vec<Category>>(&self.provider_hash, "vod_categories", None)
             .await
         {
-            if !cached.is_expired() {
-                return Ok(cached.data);
-            }
+            return Ok(cached.data);
         }
 
         let categories: Vec<Category> = self.make_request("get_vod_categories", None).await?;
@@ -463,7 +507,6 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            u64::MAX, // Never expire cache
         );
 
         if let Err(e) = self
@@ -489,9 +532,7 @@ impl XTreamAPI {
             .get_cached::<Vec<Category>>(&self.provider_hash, "series_categories", None)
             .await
         {
-            if !cached.is_expired() {
-                return Ok(cached.data);
-            }
+            return Ok(cached.data);
         }
 
         let categories: Vec<Category> = self.make_request("get_series_categories", None).await?;
@@ -499,7 +540,6 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            u64::MAX, // Never expire cache
         );
 
         if let Err(e) = self
@@ -526,8 +566,7 @@ impl XTreamAPI {
             .get_cached::<Vec<Stream>>(&self.provider_hash, "live_streams", None)
             .await
         {
-            if !cached.is_expired() {
-                let filtered_streams = if let Some(cat_id) = category_id {
+            let filtered_streams = if let Some(cat_id) = category_id {
                     cached
                         .data
                         .into_iter()
@@ -543,7 +582,6 @@ impl XTreamAPI {
                     cached.data
                 };
                 return Ok(filtered_streams);
-            }
         }
 
         // If All cache is expired or missing, fetch fresh data
@@ -552,7 +590,6 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            u64::MAX, // Never expire cache
         );
 
         // Always cache the full "All" response
@@ -596,8 +633,7 @@ impl XTreamAPI {
             .get_cached::<Vec<Stream>>(&self.provider_hash, "vod_streams", None)
             .await
         {
-            if !cached.is_expired() {
-                let filtered_streams = if let Some(cat_id) = category_id {
+            let filtered_streams = if let Some(cat_id) = category_id {
                     cached
                         .data
                         .into_iter()
@@ -613,7 +649,6 @@ impl XTreamAPI {
                     cached.data
                 };
                 return Ok(filtered_streams);
-            }
         }
 
         // If All cache is expired or missing, fetch fresh data
@@ -622,7 +657,6 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            u64::MAX, // Never expire cache
         );
 
         // Always cache the full "All" response
@@ -666,8 +700,7 @@ impl XTreamAPI {
             .get_cached::<Vec<SeriesInfo>>(&self.provider_hash, "series", None)
             .await
         {
-            if !cached.is_expired() {
-                let filtered_series = if let Some(cat_id) = category_id {
+            let filtered_series = if let Some(cat_id) = category_id {
                     cached
                         .data
                         .into_iter()
@@ -683,7 +716,6 @@ impl XTreamAPI {
                     cached.data
                 };
                 return Ok(filtered_series);
-            }
         }
 
         // If All cache is expired or missing, fetch fresh data
@@ -692,7 +724,6 @@ impl XTreamAPI {
         let metadata = CacheMetadata::new(
             self.base_url.clone(),
             self.provider_name.clone(),
-            u64::MAX, // Never expire cache
         );
 
         // Always cache the full "All" response
@@ -727,6 +758,78 @@ impl XTreamAPI {
         };
 
         Ok(result_series)
+    }
+
+    pub async fn get_series_info(&mut self, series_id: u32) -> Result<SeriesInfoDetailed> {
+        // Try to get from cache first
+        let cache_key = format!("series_info_{}", series_id);
+        if let Ok(Some(cached)) = self
+            .cache_manager
+            .get_cached::<SeriesInfoDetailed>(&self.provider_hash, &cache_key, None)
+            .await
+        {
+            return Ok(cached.data);
+        }
+
+        // Fetch fresh data from API
+        let url = format!(
+            "{}/player_api.php?username={}&password={}&action=get_series_info&series_id={}",
+            self.base_url, self.username, self.password, series_id
+        );
+
+        debug!("Requesting series info for ID: {}", series_id);
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::with_template("{spinner:.green} {msg}")
+                .unwrap()
+                .tick_strings(&["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"]),
+        );
+        pb.set_message(format!("Fetching series info..."));
+        pb.enable_steady_tick(Duration::from_millis(120));
+
+        let response = self.client.get(&url).send().await?;
+        let response_text = response.text().await?;
+
+        pb.finish_and_clear();
+
+        if response_text.trim().is_empty() {
+            return Err(anyhow::anyhow!("Empty response from server"));
+        }
+
+        let series_data: SeriesInfoDetailed = serde_json::from_str(&response_text).map_err(|e| {
+            warn!("JSON parsing error for series info: {}", e);
+            anyhow::anyhow!("Failed to parse series info: {}", e)
+        })?;
+
+        // Cache the result
+        let metadata = CacheMetadata::new(
+            self.base_url.clone(),
+            self.provider_name.clone(),
+        );
+
+        if let Err(e) = self
+            .cache_manager
+            .store_cache(
+                &self.provider_hash,
+                &cache_key,
+                None,
+                series_data.clone(),
+                metadata,
+            )
+            .await
+        {
+            eprintln!("Warning: Failed to cache series info: {}", e);
+        }
+
+        Ok(series_data)
+    }
+
+    pub fn get_episode_stream_url(&self, episode_id: &str, extension: Option<&str>) -> String {
+        let ext = extension.unwrap_or("m3u8");
+        format!(
+            "{}/series/{}/{}/{}.{}",
+            self.base_url, self.username, self.password, episode_id, ext
+        )
     }
 
     pub fn get_stream_url(
@@ -772,40 +875,34 @@ impl XTreamAPI {
         let mut tasks = Vec::new();
 
         // Warm live categories
-        if let Ok(Some(cached)) = self
+        if let Ok(Some(_cached)) = self
             .cache_manager
             .get_cached::<Vec<Category>>(&self.provider_hash, "live_categories", None)
             .await
         {
-            if cached.is_expired() {
-                tasks.push("live_categories");
-            }
+            // Cache exists, no need to warm
         } else {
             tasks.push("live_categories");
         }
 
         // Warm VOD categories
-        if let Ok(Some(cached)) = self
+        if let Ok(Some(_cached)) = self
             .cache_manager
             .get_cached::<Vec<Category>>(&self.provider_hash, "vod_categories", None)
             .await
         {
-            if cached.is_expired() {
-                tasks.push("vod_categories");
-            }
+            // Cache exists, no need to warm
         } else {
             tasks.push("vod_categories");
         }
 
         // Warm series categories
-        if let Ok(Some(cached)) = self
+        if let Ok(Some(_cached)) = self
             .cache_manager
             .get_cached::<Vec<Category>>(&self.provider_hash, "series_categories", None)
             .await
         {
-            if cached.is_expired() {
-                tasks.push("series_categories");
-            }
+            // Cache exists, no need to warm
         } else {
             tasks.push("series_categories");
         }
@@ -844,23 +941,23 @@ impl XTreamAPI {
 
             let is_cached_and_fresh = match content_type {
                 "live" | "vod" => {
-                    if let Ok(Some(cached)) = self
+                    if let Ok(Some(_cached)) = self
                         .cache_manager
                         .get_cached::<Vec<Stream>>(&self.provider_hash, cache_key, None)
                         .await
                     {
-                        !cached.is_expired()
+                        true // Cache exists
                     } else {
                         false
                     }
                 }
                 "series" => {
-                    if let Ok(Some(cached)) = self
+                    if let Ok(Some(_cached)) = self
                         .cache_manager
                         .get_cached::<Vec<SeriesInfo>>(&self.provider_hash, cache_key, None)
                         .await
                     {
-                        !cached.is_expired()
+                        true // Cache exists
                     } else {
                         false
                     }

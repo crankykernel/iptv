@@ -738,23 +738,230 @@ impl MenuSystem {
 
                 let selected_series = &series[selected_index];
 
-                // For series, we would need to fetch episodes here
-                // This is a simplified version that shows series info
-                println!("Series: {}", selected_series.name);
-                if let Some(ref plot) = selected_series.plot {
-                    println!("Plot: {}", plot);
+                // Fetch detailed series information with episodes
+                println!("Loading episodes for: {}", selected_series.name);
+                match self.browse_episodes(selected_series.series_id).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("Failed to load episodes: {}", e);
+                        println!("Press Enter to continue...");
+                        std::io::stdin().read_line(&mut String::new()).ok();
+                    }
                 }
-                if let Some(ref genre) = selected_series.genre {
-                    println!("Genre: {}", genre);
-                }
-                if let Some(ref release_date) = selected_series.release_date {
-                    println!("Release: {}", release_date);
-                }
-
-                println!("Episode browsing not yet implemented.");
             } else {
                 break;
             }
+        }
+
+        Ok(())
+    }
+
+    async fn browse_episodes(&mut self, series_id: u32) -> Result<()> {
+        let api = self
+            .current_api
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
+
+        // Get detailed series info with episodes
+        let series_info = api.get_series_info(series_id).await?;
+
+        // Display series info
+        println!("\n=== {} ===", series_info.info.name);
+        if let Some(ref plot) = series_info.info.plot {
+            println!("Plot: {}", plot);
+        }
+        if let Some(ref genre) = series_info.info.genre {
+            println!("Genre: {}", genre);
+        }
+        if let Some(ref release_date) = series_info.info.release_date {
+            println!("Release: {}", release_date);
+        }
+        if let Some(ref rating) = series_info.info.rating {
+            println!("Rating: {}", rating);
+        }
+        println!();
+
+        if series_info.seasons.is_empty() {
+            println!("No episodes found for this series.");
+            println!("Press Enter to continue...");
+            std::io::stdin().read_line(&mut String::new()).ok();
+            return Ok(());
+        }
+
+        // Browse seasons and episodes
+        let mut last_selected_season = 0;
+        loop {
+            // Create season options
+            let season_options: Vec<String> = series_info
+                .seasons
+                .iter()
+                .map(|season| {
+                    let episodes_count = season.episodes.len();
+                    if let Some(ref name) = season.name {
+                        format!("Season {} - {} ({} episodes)", season.season_number, name, episodes_count)
+                    } else {
+                        format!("Season {} ({} episodes)", season.season_number, episodes_count)
+                    }
+                })
+                .collect();
+
+            let mut season_options_with_back = season_options.clone();
+            season_options_with_back.push("⬅ Back to Series".to_string());
+
+            // Ensure valid cursor position
+            if last_selected_season >= season_options.len() {
+                last_selected_season = season_options.len().saturating_sub(1);
+            }
+
+            let select = Select::new("Select Season:", season_options_with_back)
+                .with_page_size(self.page_size)
+                .with_starting_cursor(last_selected_season);
+
+            match select.prompt_skippable()? {
+                Some(selection) => {
+                    if selection == "⬅ Back to Series" {
+                        break;
+                    }
+
+                    // Find selected season index
+                    if let Some(season_index) = season_options.iter().position(|opt| *opt == selection) {
+                        last_selected_season = season_index;
+                        let selected_season = &series_info.seasons[season_index];
+                        
+                        // Browse episodes in this season
+                        self.browse_season_episodes(selected_season, &series_info.info.name).await?;
+                    }
+                }
+                None => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn browse_season_episodes(&mut self, season: &crate::xtream_api::Season, series_name: &str) -> Result<()> {
+        let mut last_selected_episode = 0;
+
+        loop {
+            // Create episode options
+            let episode_options: Vec<String> = season
+                .episodes
+                .iter()
+                .map(|episode| {
+                    let duration_info = if let Some(ref info) = episode.info {
+                        if let Some(ref duration) = info.duration {
+                            format!(" ({})", duration)
+                        } else if let Some(duration_secs) = info.duration_secs {
+                            let minutes = duration_secs / 60;
+                            let seconds = duration_secs % 60;
+                            format!(" ({}:{:02})", minutes, seconds)
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                    format!("Episode {} - {}{}", episode.episode_num, episode.title, duration_info)
+                })
+                .collect();
+
+            if episode_options.is_empty() {
+                println!("No episodes found in this season.");
+                println!("Press Enter to continue...");
+                std::io::stdin().read_line(&mut String::new()).ok();
+                return Ok(());
+            }
+
+            let mut episode_options_with_back = episode_options.clone();
+            episode_options_with_back.push("⬅ Back to Seasons".to_string());
+
+            // Ensure valid cursor position
+            if last_selected_episode >= episode_options.len() {
+                last_selected_episode = episode_options.len().saturating_sub(1);
+            }
+
+            let season_name = if let Some(ref name) = season.name {
+                format!("Season {} - {}", season.season_number, name)
+            } else {
+                format!("Season {}", season.season_number)
+            };
+
+            let prompt_text = format!("{} - {} Episodes:", series_name, season_name);
+            let select = Select::new(
+                &prompt_text,
+                episode_options_with_back
+            )
+            .with_page_size(self.page_size)
+            .with_starting_cursor(last_selected_episode);
+
+            match select.prompt_skippable()? {
+                Some(selection) => {
+                    if selection == "⬅ Back to Seasons" {
+                        break;
+                    }
+
+                    // Find selected episode index
+                    if let Some(episode_index) = episode_options.iter().position(|opt| *opt == selection) {
+                        last_selected_episode = episode_index;
+                        let selected_episode = &season.episodes[episode_index];
+
+                        // Show episode details and play option
+                        self.handle_episode_selection(selected_episode, series_name).await?;
+                    }
+                }
+                None => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_episode_selection(&mut self, episode: &crate::xtream_api::Episode, series_name: &str) -> Result<()> {
+        // Display episode details
+        println!("\n=== {} - Episode {} ===", series_name, episode.episode_num);
+        println!("Title: {}", episode.title);
+        
+        if let Some(ref info) = episode.info {
+            if let Some(ref plot) = info.plot {
+                println!("Plot: {}", plot);
+            }
+            if let Some(ref release_date) = info.releasedate {
+                println!("Release Date: {}", release_date);
+            }
+            if let Some(ref rating) = info.rating {
+                println!("Rating: {}", rating);
+            }
+            if let Some(ref duration) = info.duration {
+                println!("Duration: {}", duration);
+            } else if let Some(duration_secs) = info.duration_secs {
+                let minutes = duration_secs / 60;
+                let seconds = duration_secs % 60;
+                println!("Duration: {}:{:02}", minutes, seconds);
+            }
+        }
+
+        // Episode action menu
+        let actions = vec!["▶ Play Episode", "⬅ Back"];
+        let action_selection = Select::new(
+            &format!("Action for Episode {}:", episode.episode_num),
+            actions,
+        )
+        .prompt_skippable()?;
+
+        match action_selection {
+            Some("▶ Play Episode") => {
+                let api = self
+                    .current_api
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
+
+                let stream_url = api.get_episode_stream_url(&episode.id, episode.container_extension.as_deref());
+                println!("Playing: {} - Episode {}", series_name, episode.episode_num);
+                
+                self.player.play(&stream_url)?;
+            }
+            _ => {} // Back
         }
 
         Ok(())

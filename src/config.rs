@@ -30,7 +30,6 @@ pub struct PlayerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
-    pub ttl_seconds: u64,
     pub max_entries: usize,
 }
 
@@ -54,7 +53,6 @@ impl Default for Config {
                 args: vec!["--fs".to_string(), "--quiet".to_string()],
             },
             cache: CacheConfig {
-                ttl_seconds: u64::MAX, // Never expire cache
                 max_entries: 1000,
             },
             ui: UiConfig {
