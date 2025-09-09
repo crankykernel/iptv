@@ -6,6 +6,7 @@ pub mod config;
 pub mod menu;
 pub mod player;
 pub mod xtream_api;
+pub mod tui;
 
 pub use cache::CacheManager;
 pub use config::Config;

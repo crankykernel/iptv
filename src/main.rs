@@ -24,6 +24,10 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
+    /// Use TUI (Terminal User Interface) mode
+    #[arg(long)]
+    tui: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -292,9 +296,15 @@ async fn main() -> Result<()> {
             run_rofi_menu(config.providers, player).await?;
         }
         None => {
-            // Initialize and run menu system
-            let mut menu_system = MenuSystem::new(config.providers, player, config.ui.page_size);
-            menu_system.run().await?;
+            // Check if TUI mode is requested
+            if cli.tui {
+                // Run TUI mode
+                iptv::tui::run_tui(config.providers, player).await?;
+            } else {
+                // Initialize and run menu system
+                let mut menu_system = MenuSystem::new(config.providers, player, config.ui.page_size);
+                menu_system.run().await?;
+            }
         }
     }
 
