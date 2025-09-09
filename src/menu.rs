@@ -642,10 +642,21 @@ impl MenuSystem {
 
                 match action_selection {
                     Some("▶ Play Stream") => {
-                        let url = api.get_stream_url(selected_stream.stream_id, stream_type, None);
-                        println!("Playing: {}", selected_stream.name);
-                        if let Err(e) = self.player.play(&url) {
-                            println!("Playback error: {}", e);
+                        if stream_type == "movie" {
+                            // For movies, get VOD info first to get proper extension and show description
+                            match self.handle_movie_playback(selected_stream.stream_id, &selected_stream.name).await {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    println!("Movie playback error: {}", e);
+                                }
+                            }
+                        } else {
+                            // For live streams, use the existing logic
+                            let url = api.get_stream_url(selected_stream.stream_id, stream_type, None);
+                            println!("Playing: {}", selected_stream.name);
+                            if let Err(e) = self.player.play(&url) {
+                                println!("Playback error: {}", e);
+                            }
                         }
                     }
                     Some("⭐ Add to Favourites") => {
@@ -1016,6 +1027,97 @@ impl MenuSystem {
 
         println!("Press Enter to continue...");
         let _ = std::io::stdin().read_line(&mut String::new());
+        Ok(())
+    }
+
+    async fn handle_movie_playback(&mut self, stream_id: u32, stream_name: &str) -> Result<()> {
+        let api = self
+            .current_api
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
+
+        // Get VOD info for the movie
+        println!("Loading movie information...");
+        let vod_info = match api.get_vod_info(stream_id).await {
+            Ok(info) => info,
+            Err(e) => {
+                warn!("Failed to get VOD info for stream {}: {}", stream_id, e);
+                // Fallback to basic streaming without VOD info
+                let url = api.get_stream_url(stream_id, "movie", None);
+                println!("Playing: {}", stream_name);
+                return self.player.play(&url).map_err(|e| anyhow::anyhow!("Playback error: {}", e));
+            }
+        };
+
+        // Display movie information
+        println!("\n=== {} ===", vod_info.info.name);
+        
+        if let Some(ref plot) = vod_info.info.plot {
+            println!("Description: {}", plot);
+        }
+        
+        if let Some(ref genre) = vod_info.info.genre {
+            println!("Genre: {}", genre);
+        }
+        
+        if let Some(ref director) = vod_info.info.director {
+            println!("Director: {}", director);
+        }
+        
+        if let Some(ref cast) = vod_info.info.cast {
+            println!("Cast: {}", cast);
+        }
+        
+        if let Some(ref rating) = vod_info.info.rating {
+            println!("Rating: {}", rating);
+        }
+        
+        if let Some(ref release_date) = vod_info.info.releasedate {
+            println!("Release Date: {}", release_date);
+        }
+        
+        if let Some(ref duration_value) = vod_info.info.duration_secs {
+            // Try to parse duration_secs from various formats
+            let duration_opt = match duration_value {
+                serde_json::Value::Number(n) => n.as_u64().map(|v| v as u32),
+                serde_json::Value::String(s) => s.parse::<u32>().ok(),
+                _ => None,
+            };
+            
+            if let Some(duration) = duration_opt {
+                let hours = duration / 3600;
+                let minutes = (duration % 3600) / 60;
+                if hours > 0 {
+                    println!("Duration: {}h {}m", hours, minutes);
+                } else {
+                    println!("Duration: {}m", minutes);
+                }
+            } else if let Some(ref duration) = vod_info.info.duration {
+                println!("Duration: {}", duration);
+            }
+        } else if let Some(ref duration) = vod_info.info.duration {
+            println!("Duration: {}", duration);
+        }
+        
+        println!();
+
+        // Show play confirmation
+        let actions = vec!["▶ Play Movie", "⬅ Back"];
+        let action_selection = Select::new(
+            &format!("Action for '{}':", vod_info.info.name),
+            actions,
+        )
+        .prompt_skippable()?;
+
+        if let Some("▶ Play Movie") = action_selection {
+            // Use the container extension from VOD info
+            let extension = Some(vod_info.movie_data.container_extension.as_str());
+            let url = api.get_stream_url(stream_id, "movie", extension);
+            
+            println!("Playing: {} ({})", vod_info.info.name, vod_info.movie_data.container_extension);
+            self.player.play(&url).map_err(|e| anyhow::anyhow!("Playback error: {}", e))?;
+        }
+
         Ok(())
     }
 

@@ -177,6 +177,58 @@ pub struct FavouriteStream {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VodInfoResponse {
+    pub info: VodInfo,
+    pub movie_data: MovieData,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VodInfo {
+    #[serde(default)]
+    pub movie_image: Option<String>,
+    pub name: String,
+    #[serde(default, deserialize_with = "deserialize_optional_number_as_string")]
+    pub tmdb_id: Option<String>,
+    #[serde(default)]
+    pub backdrop: Option<String>,
+    #[serde(default)]
+    pub youtube_trailer: Option<String>,
+    #[serde(default)]
+    pub genre: Option<String>,
+    #[serde(default)]
+    pub plot: Option<String>,
+    #[serde(default)]
+    pub cast: Option<String>,
+    #[serde(default)]
+    pub rating: Option<String>,
+    #[serde(default)]
+    pub director: Option<String>,
+    #[serde(default)]
+    pub releasedate: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_string_or_vec")]
+    pub backdrop_path: Option<Vec<String>>,
+    #[serde(default)]
+    pub duration_secs: Option<Value>,
+    #[serde(default)]
+    pub duration: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MovieData {
+    pub stream_id: u32,
+    pub name: String,
+    #[serde(default, deserialize_with = "deserialize_optional_number_as_string")]
+    pub added: Option<String>,
+    #[serde(default)]
+    pub category_id: Option<String>,
+    pub container_extension: String,
+    #[serde(default)]
+    pub custom_sid: Option<String>,
+    #[serde(default)]
+    pub direct_source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeriesInfo {
     #[serde(default)]
     pub num: u32,
@@ -952,6 +1004,82 @@ impl XTreamAPI {
         }
 
         Ok(series_data)
+    }
+
+    pub async fn get_vod_info(&mut self, vod_id: u32) -> Result<VodInfoResponse> {
+        // Try to get from cache first
+        let cache_key = format!("vod_info_{}", vod_id);
+        if let Ok(Some(cached)) = self
+            .cache_manager
+            .get_cached::<VodInfoResponse>(&self.provider_hash, &cache_key, None)
+            .await
+        {
+            return Ok(cached.data);
+        }
+
+        // Fetch fresh data from API
+        let url = format!(
+            "{}/player_api.php?username={}&password={}&action=get_vod_info&vod_id={}",
+            self.base_url, self.username, self.password, vod_id
+        );
+
+        debug!("Requesting VOD info for ID: {}", vod_id);
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::with_template("{spinner:.green} {msg}")
+                .unwrap()
+                .tick_strings(&["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"]),
+        );
+        pb.set_message("Fetching movie info...".to_string());
+        pb.enable_steady_tick(Duration::from_millis(120));
+
+        let response = self.client.get(&url).send().await?;
+        let response_text = response.text().await?;
+
+        pb.finish_and_clear();
+
+        if response_text.trim().is_empty() {
+            return Err(anyhow::anyhow!("Empty response from server"));
+        }
+
+        // Log response for debugging
+        debug!("VOD info response: {}", if response_text.len() > 1000 { 
+            format!("{}... (truncated, {} bytes total)", &response_text[..1000], response_text.len()) 
+        } else { 
+            response_text.clone() 
+        });
+
+        let vod_data: VodInfoResponse = serde_json::from_str(&response_text).map_err(|e| {
+            warn!("JSON parsing error for VOD info: {}", e);
+            warn!("Response content: {}", if response_text.len() > 200 { 
+                format!("{}... (truncated)", &response_text[..200]) 
+            } else { 
+                response_text.clone() 
+            });
+            anyhow::anyhow!("Failed to parse VOD info: {}", e)
+        })?;
+
+        // Cache the result
+        let metadata = CacheMetadata::new(
+            self.base_url.clone(),
+            self.provider_name.clone(),
+        );
+
+        if let Err(e) = self
+            .cache_manager
+            .store_cache(
+                &self.provider_hash,
+                &cache_key,
+                None,
+                vod_data.clone(),
+                metadata,
+            )
+            .await
+        {
+            eprintln!("Warning: Failed to cache VOD info: {}", e);
+        }
+
+        Ok(vod_data)
     }
 
     pub fn get_episode_stream_url(&self, episode_id: &str, extension: Option<&str>) -> String {
