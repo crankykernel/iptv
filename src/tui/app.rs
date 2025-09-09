@@ -154,6 +154,7 @@ impl App {
                     if self.providers.len() > 1 {
                         self.state = AppState::ProviderSelection;
                         self.selected_index = 0;
+                        self.scroll_offset = 0;
                         self.update_provider_items();
                     } else {
                         return Some(Action::Quit);
@@ -177,6 +178,7 @@ impl App {
                 KeyCode::Esc | KeyCode::Char('b') => {
                     self.state = AppState::MainMenu;
                     self.selected_index = 0;
+                    self.scroll_offset = 0;
                     self.update_main_menu_items();
                 }
                 _ => {}
@@ -206,6 +208,7 @@ impl App {
                     KeyCode::Esc | KeyCode::Char('b') => {
                         self.state = AppState::CategorySelection(content_type.clone());
                         self.selected_index = 0;
+                        self.scroll_offset = 0;
                     }
                     _ => {}
                 }
@@ -232,6 +235,7 @@ impl App {
                         self.state =
                             AppState::StreamSelection(ContentType::Series, category.clone());
                         self.selected_index = 0;
+                        self.scroll_offset = 0;
                     }
                 }
                 _ => {}
@@ -252,6 +256,7 @@ impl App {
                 KeyCode::Esc | KeyCode::Char('b') => {
                     self.state = AppState::SeasonSelection(series.clone());
                     self.selected_index = 0;
+                    self.scroll_offset = 0;
                 }
                 _ => {}
             },
@@ -276,6 +281,7 @@ impl App {
                 KeyCode::Esc | KeyCode::Char('b') => {
                     self.state = AppState::MainMenu;
                     self.selected_index = 0;
+                    self.scroll_offset = 0;
                     self.update_main_menu_items();
                 }
                 _ => {}
@@ -372,6 +378,7 @@ impl App {
                 self.current_api = Some(api);
                 self.state = AppState::MainMenu;
                 self.selected_index = 0;
+                self.scroll_offset = 0;
                 self.update_main_menu_items();
                 self.add_log("Successfully connected to provider".to_string());
             }
@@ -713,6 +720,7 @@ impl App {
 
         self.state = AppState::MainMenu;
         self.selected_index = 0;
+        self.scroll_offset = 0;
         self.update_main_menu_items();
         self.add_log("Stopped playback".to_string());
     }

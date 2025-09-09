@@ -116,8 +116,14 @@ fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Calculate visible range
     let visible_height = inner_area.height as usize;
-    let start = app.scroll_offset;
+    // Ensure scroll_offset is valid for current list
+    let start = app.scroll_offset.min(app.items.len().saturating_sub(1));
     let end = (start + visible_height).min(app.items.len());
+
+    // Safety check to prevent panic
+    if start > app.items.len() {
+        return;
+    }
 
     // Create list items with selection highlighting
     let items: Vec<ListItem> = app.items[start..end]
