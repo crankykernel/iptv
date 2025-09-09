@@ -331,16 +331,34 @@ impl App {
                     if self.selected_index < self.cross_provider_favourites.len() {
                         let (favourite, provider) = self.cross_provider_favourites[self.selected_index].clone();
                         
-                        // Store the current state to return to after starting playback
-                        let return_state = self.state.clone();
-                        
-                        // Connect to provider if needed
+                        // Connect to provider silently if needed (without changing state)
                         if self.current_api.is_none() || 
                            self.current_api.as_ref().unwrap().provider_hash != 
                            crate::XTreamAPI::new(provider.url.clone(), provider.username.clone(),
                                                 provider.password.clone(), provider.name.clone())
                                                 .unwrap().provider_hash {
-                            self.connect_to_provider(&provider).await;
+                            
+                            self.add_log(format!(
+                                "Connecting to provider: {}",
+                                provider.name.as_ref().unwrap_or(&provider.url)
+                            ));
+                            
+                            match crate::XTreamAPI::new(
+                                provider.url.clone(),
+                                provider.username.clone(),
+                                provider.password.clone(),
+                                provider.name.clone(),
+                            ) {
+                                Ok(api) => {
+                                    self.current_api = Some(api);
+                                    self.add_log("Successfully connected to provider".to_string());
+                                }
+                                Err(e) => {
+                                    self.state = AppState::Error(format!("Failed to connect: {}", e));
+                                    self.add_log(format!("Connection failed: {}", e));
+                                    return None;
+                                }
+                            }
                         }
                         
                         // Play the favourite using TUI-specific method
@@ -351,6 +369,8 @@ impl App {
                                 None,
                             );
                             
+                            self.add_log(format!("Playing: {}", favourite.name));
+                            
                             // Use TUI-specific play method that runs in background
                             if let Err(e) = self.player.play_tui(&stream_url).await {
                                 self.state = AppState::Error(format!("Failed to play favourite: {}", e));
@@ -358,8 +378,7 @@ impl App {
                             } else {
                                 self.add_log("Player started in background window".to_string());
                                 self.add_log("Continue browsing while video plays".to_string());
-                                // Return to the current state so user can continue browsing
-                                self.state = return_state;
+                                // Stay in CrossProviderFavourites state
                             }
                         }
                     }
