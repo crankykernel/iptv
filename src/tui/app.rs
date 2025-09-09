@@ -6,6 +6,8 @@ use crate::menu::ContentType;
 use crate::player::Player;
 use crate::xtream_api::{ApiEpisode, Category, FavouriteStream, Stream, XTreamAPI};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
@@ -50,6 +52,9 @@ pub struct App {
     pub logs: Vec<(Instant, String)>,
     pub show_help: bool,
     pub page_size: usize,
+    pub search_query: String,
+    pub search_active: bool,
+    pub filtered_indices: Vec<usize>,
     categories: Vec<Category>,
     streams: Vec<Stream>,
     seasons: Vec<TuiSeason>,
@@ -89,6 +94,9 @@ impl App {
             logs: Vec::new(),
             show_help: false,
             page_size: 20,
+            search_query: String::new(),
+            search_active: false,
+            filtered_indices: Vec::new(),
             categories: Vec::new(),
             streams: Vec::new(),
             seasons: Vec::new(),
@@ -106,6 +114,44 @@ impl App {
     pub async fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Some(Action::Quit);
+        }
+
+        // Handle search mode input
+        if self.search_active {
+            match key.code {
+                KeyCode::Esc => {
+                    self.cancel_search();
+                    return None;
+                }
+                KeyCode::Enter => {
+                    self.confirm_search();
+                    return None;
+                }
+                KeyCode::Backspace => {
+                    self.delete_search_char();
+                    return None;
+                }
+                KeyCode::Char(c) => {
+                    self.update_search(c);
+                    return None;
+                }
+                _ => return None,
+            }
+        }
+
+        // Start search on '/' key
+        if key.code == KeyCode::Char('/')
+            && !matches!(self.state, AppState::Loading(_) | AppState::Playing(_))
+        {
+            self.start_search();
+            return None;
+        }
+
+        // Global stop playback key
+        if key.code == KeyCode::Char('s') {
+            self.stop_playing();
+            self.add_log("Stopping any active playback".to_string());
+            return None;
         }
 
         if key.code == KeyCode::Char('q') {
@@ -299,58 +345,104 @@ impl App {
     }
 
     fn move_selection_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-            if self.selected_index < self.scroll_offset {
-                self.scroll_offset = self.selected_index;
+        let indices = if self.filtered_indices.is_empty() {
+            (0..self.items.len()).collect()
+        } else {
+            self.filtered_indices.clone()
+        };
+
+        if let Some(current_pos) = indices.iter().position(|&idx| idx == self.selected_index) {
+            if current_pos > 0 {
+                self.selected_index = indices[current_pos - 1];
+                // Update scroll to follow selection
+                let visible_pos = indices[0..current_pos]
+                    .iter()
+                    .filter(|&&idx| idx >= self.scroll_offset)
+                    .count();
+                if visible_pos == 0 {
+                    self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                }
             }
         }
     }
 
     fn move_selection_down(&mut self) {
-        let max_index = self.items.len().saturating_sub(1);
-        if self.selected_index < max_index {
-            self.selected_index += 1;
-            let visible_height = 20; // Adjust based on terminal height
-            if self.selected_index >= self.scroll_offset + visible_height {
-                self.scroll_offset = self.selected_index - visible_height + 1;
+        let indices = if self.filtered_indices.is_empty() {
+            (0..self.items.len()).collect()
+        } else {
+            self.filtered_indices.clone()
+        };
+
+        if let Some(current_pos) = indices.iter().position(|&idx| idx == self.selected_index) {
+            if current_pos < indices.len() - 1 {
+                self.selected_index = indices[current_pos + 1];
+                // Update scroll to follow selection
+                let visible_height = 20;
+                if current_pos + 1 >= self.scroll_offset + visible_height {
+                    self.scroll_offset = current_pos + 1 - visible_height + 1;
+                }
             }
         }
     }
 
     fn move_selection_page_up(&mut self) {
-        let page_size = 10; // Move 10 items at a time
-        if self.selected_index > 0 {
-            self.selected_index = self.selected_index.saturating_sub(page_size);
-            if self.selected_index < self.scroll_offset {
-                self.scroll_offset = self.selected_index;
+        let indices = if self.filtered_indices.is_empty() {
+            (0..self.items.len()).collect()
+        } else {
+            self.filtered_indices.clone()
+        };
+
+        if let Some(current_pos) = indices.iter().position(|&idx| idx == self.selected_index) {
+            let new_pos = current_pos.saturating_sub(10);
+            self.selected_index = indices[new_pos];
+            if new_pos < self.scroll_offset {
+                self.scroll_offset = new_pos;
             }
         }
     }
 
     fn move_selection_page_down(&mut self) {
-        let page_size = 10; // Move 10 items at a time
-        let max_index = self.items.len().saturating_sub(1);
-        if self.selected_index < max_index {
-            self.selected_index = (self.selected_index + page_size).min(max_index);
+        let indices = if self.filtered_indices.is_empty() {
+            (0..self.items.len()).collect()
+        } else {
+            self.filtered_indices.clone()
+        };
+
+        if let Some(current_pos) = indices.iter().position(|&idx| idx == self.selected_index) {
+            let new_pos = (current_pos + 10).min(indices.len() - 1);
+            self.selected_index = indices[new_pos];
             let visible_height = 20;
-            if self.selected_index >= self.scroll_offset + visible_height {
-                self.scroll_offset = self.selected_index - visible_height + 1;
+            if new_pos >= self.scroll_offset + visible_height {
+                self.scroll_offset = new_pos - visible_height + 1;
             }
         }
     }
 
     fn move_selection_home(&mut self) {
-        self.selected_index = 0;
-        self.scroll_offset = 0;
+        let indices = if self.filtered_indices.is_empty() {
+            (0..self.items.len()).collect()
+        } else {
+            self.filtered_indices.clone()
+        };
+
+        if !indices.is_empty() {
+            self.selected_index = indices[0];
+            self.scroll_offset = 0;
+        }
     }
 
     fn move_selection_end(&mut self) {
-        if !self.items.is_empty() {
-            self.selected_index = self.items.len() - 1;
+        let indices = if self.filtered_indices.is_empty() {
+            (0..self.items.len()).collect()
+        } else {
+            self.filtered_indices.clone()
+        };
+
+        if !indices.is_empty() {
+            self.selected_index = indices[indices.len() - 1];
             let visible_height = 20;
-            if self.items.len() > visible_height {
-                self.scroll_offset = self.items.len() - visible_height;
+            if indices.len() > visible_height {
+                self.scroll_offset = indices.len() - visible_height;
             } else {
                 self.scroll_offset = 0;
             }
@@ -395,6 +487,7 @@ impl App {
             .iter()
             .map(|p| p.name.clone().unwrap_or_else(|| p.url.clone()))
             .collect();
+        self.reset_filter();
     }
 
     fn update_main_menu_items(&mut self) {
@@ -406,6 +499,7 @@ impl App {
             "Refresh Cache".to_string(),
             "Clear Cache".to_string(),
         ];
+        self.reset_filter();
     }
 
     async fn handle_main_menu_selection(&mut self) {
@@ -439,6 +533,7 @@ impl App {
                         .iter()
                         .map(|c| c.category_name.clone())
                         .collect();
+                    self.reset_filter();
                     self.state = AppState::CategorySelection(content_type);
                     self.selected_index = 0;
                     self.scroll_offset = 0;
@@ -500,6 +595,7 @@ impl App {
                 Ok(streams) => {
                     self.streams = streams;
                     self.items = self.streams.iter().map(|s| s.name.clone()).collect();
+                    self.reset_filter();
                     self.state = AppState::StreamSelection(content_type, category);
                     self.selected_index = 0;
                     self.scroll_offset = 0;
@@ -541,6 +637,7 @@ impl App {
                         .iter()
                         .map(|s| format!("{} ({} episodes)", s.name, s.episode_count))
                         .collect();
+                    self.reset_filter();
 
                     self.state = AppState::SeasonSelection(series);
                     self.selected_index = 0;
@@ -574,6 +671,7 @@ impl App {
                                 .iter()
                                 .map(|e| format!("Episode {}: {}", e.episode_num, e.title))
                                 .collect();
+                            self.reset_filter();
 
                             self.state = AppState::EpisodeSelection(series, season);
                             self.selected_index = 0;
@@ -608,6 +706,7 @@ impl App {
                         .iter()
                         .map(|f| format!("[{}] {}", f.stream_type, f.name))
                         .collect();
+                    self.reset_filter();
 
                     self.state = AppState::FavouriteSelection;
                     self.selected_index = 0;
@@ -645,7 +744,9 @@ impl App {
     }
 
     async fn play_stream(&mut self, stream: &Stream) {
-        self.state = AppState::Playing(stream.name.clone());
+        // Store the current state to return to after starting playback
+        let return_state = self.state.clone();
+
         self.add_log(format!("Playing: {}", stream.name));
 
         if let Some(api) = &self.current_api {
@@ -659,19 +760,26 @@ impl App {
                 stream.container_extension.as_deref(),
             );
 
+            // Log the stream URL to the logs panel
+            self.add_log(format!("Stream URL: {}", url));
+
             // Use TUI-specific play method that runs in background
             if let Err(e) = self.player.play_tui(&url).await {
                 self.state = AppState::Error(format!("Failed to play stream: {}", e));
                 self.add_log(format!("Playback failed: {}", e));
             } else {
                 self.add_log("Player started in background window".to_string());
-                self.add_log("Press 's' or Esc to stop playback".to_string());
+                self.add_log("Continue browsing while video plays".to_string());
+                // Return to the previous state so user can continue browsing
+                self.state = return_state;
             }
         }
     }
 
     async fn play_episode(&mut self, episode: &ApiEpisode) {
-        self.state = AppState::Playing(episode.title.clone());
+        // Store the current state to return to after starting playback
+        let return_state = self.state.clone();
+
         self.add_log(format!("Playing: {}", episode.title));
 
         if let Some(api) = &self.current_api {
@@ -681,19 +789,26 @@ impl App {
                 episode.container_extension.as_deref(),
             );
 
+            // Log the stream URL to the logs panel
+            self.add_log(format!("Stream URL: {}", url));
+
             // Use TUI-specific play method that runs in background
             if let Err(e) = self.player.play_tui(&url).await {
                 self.state = AppState::Error(format!("Failed to play episode: {}", e));
                 self.add_log(format!("Playback failed: {}", e));
             } else {
                 self.add_log("Player started in background window".to_string());
-                self.add_log("Press 's' or Esc to stop playback".to_string());
+                self.add_log("Continue browsing while video plays".to_string());
+                // Return to the previous state so user can continue browsing
+                self.state = return_state;
             }
         }
     }
 
     async fn play_favourite(&mut self, fav: &FavouriteStream) {
-        self.state = AppState::Playing(fav.name.clone());
+        // Store the current state to return to after starting playback
+        let return_state = self.state.clone();
+
         self.add_log(format!("Playing favourite: {}", fav.name));
 
         if let Some(api) = &self.current_api {
@@ -706,7 +821,9 @@ impl App {
                 self.add_log(format!("Playback failed: {}", e));
             } else {
                 self.add_log("Player started in background window".to_string());
-                self.add_log("Press 's' or Esc to stop playback".to_string());
+                self.add_log("Continue browsing while video plays".to_string());
+                // Return to the previous state so user can continue browsing
+                self.state = return_state;
             }
         }
     }
@@ -747,6 +864,79 @@ impl App {
         }
     }
 
+    fn start_search(&mut self) {
+        self.search_active = true;
+        self.search_query.clear();
+        self.apply_filter();
+        self.status_message =
+            Some("Search: Type to filter, Enter to confirm, Esc to cancel".to_string());
+    }
+
+    fn update_search(&mut self, c: char) {
+        if self.search_active {
+            self.search_query.push(c);
+            self.apply_filter();
+            self.status_message = Some(format!("Search: {}", self.search_query));
+        }
+    }
+
+    fn delete_search_char(&mut self) {
+        if self.search_active && !self.search_query.is_empty() {
+            self.search_query.pop();
+            self.apply_filter();
+            self.status_message = Some(if self.search_query.is_empty() {
+                "Search: Type to filter, Enter to confirm, Esc to cancel".to_string()
+            } else {
+                format!("Search: {}", self.search_query)
+            });
+        }
+    }
+
+    fn apply_filter(&mut self) {
+        if self.search_query.is_empty() {
+            self.filtered_indices = (0..self.items.len()).collect();
+        } else {
+            let matcher = SkimMatcherV2::default();
+            let mut scored_items: Vec<(usize, i64)> = Vec::new();
+
+            for (idx, item) in self.items.iter().enumerate() {
+                if let Some(score) = matcher.fuzzy_match(item, &self.search_query) {
+                    scored_items.push((idx, score));
+                }
+            }
+
+            // Sort by score (highest first)
+            scored_items.sort_by(|a, b| b.1.cmp(&a.1));
+            self.filtered_indices = scored_items.into_iter().map(|(idx, _)| idx).collect();
+        }
+
+        // Reset selection to first filtered item
+        if !self.filtered_indices.is_empty() {
+            self.selected_index = self.filtered_indices[0];
+            self.scroll_offset = 0;
+        }
+    }
+
+    fn cancel_search(&mut self) {
+        self.search_active = false;
+        self.search_query.clear();
+        self.filtered_indices = (0..self.items.len()).collect();
+        self.status_message = None;
+    }
+
+    fn confirm_search(&mut self) {
+        self.search_active = false;
+        // Keep the filter applied
+        self.status_message = if !self.search_query.is_empty() {
+            Some(format!(
+                "Filtered: \"{}\" (Press '/' to search again)",
+                self.search_query
+            ))
+        } else {
+            None
+        };
+    }
+
     async fn clear_cache(&mut self) {
         self.state = AppState::Loading("Clearing cache...".to_string());
         self.add_log("Clearing all cache".to_string());
@@ -769,5 +959,12 @@ impl App {
         if self.logs.len() > 100 {
             self.logs.remove(0);
         }
+    }
+
+    fn reset_filter(&mut self) {
+        self.search_query.clear();
+        self.search_active = false;
+        self.filtered_indices = (0..self.items.len()).collect();
+        self.status_message = None;
     }
 }

@@ -1112,7 +1112,7 @@ impl XTreamAPI {
             ),
         };
 
-        println!("Stream URL: {}", url);
+        // URL logging moved to TUI logs panel
         url
     }
 

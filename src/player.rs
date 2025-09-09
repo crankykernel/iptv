@@ -99,38 +99,55 @@ impl Player {
 
     /// Play video for TUI mode - runs in background with no terminal output
     pub async fn play_tui(&self, url: &str) -> Result<()> {
-        // Stop any existing playback first
-        self.stop_tui().await?;
-
-        let mut cmd = Command::new(&self.config.command);
-
-        // Add configured arguments
-        for arg in &self.config.args {
-            cmd.arg(arg);
+        // Stop any existing playback first (but don't wait for it)
+        {
+            let mut process_guard = self.current_process.lock().await;
+            if let Some(mut child) = process_guard.take() {
+                let _ = child.kill();
+                // Don't wait - let it terminate in background
+            }
         }
 
-        // Add arguments to suppress terminal output and run in pseudo-gui mode
-        // These work for mpv - might need adjustment for other players
-        cmd.arg("--no-terminal");
-        cmd.arg("--force-window=yes");
-        cmd.arg("--keep-open=no");
+        // Clone values needed in the closure
+        let player_cmd = self.config.command.clone();
+        let player_args = self.config.args.clone();
+        let url = url.to_string();
 
-        // Add the URL
-        cmd.arg(url);
+        // Spawn the process in a completely detached way
+        let child = tokio::task::spawn_blocking(move || {
+            let mut cmd = Command::new(&player_cmd);
 
-        // Redirect all output to null to prevent terminal interference
-        cmd.stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .stdin(Stdio::null());
+            // Add configured arguments
+            for arg in &player_args {
+                cmd.arg(arg);
+            }
 
-        // Spawn the process
-        let child = cmd
-            .spawn()
-            .with_context(|| format!("Failed to start player: {}", self.config.command))?;
+            // Add arguments to suppress terminal output and run in background
+            // These work for mpv - might need adjustment for other players
+            cmd.arg("--no-terminal");
+            cmd.arg("--really-quiet"); // Suppress all console output
+            cmd.arg("--force-window=immediate"); // Show window immediately
+            cmd.arg("--keep-open=no");
 
-        // Store the process handle
-        let mut process_guard = self.current_process.lock().await;
-        *process_guard = Some(child);
+            // Add the URL
+            cmd.arg(&url);
+
+            // Redirect all output to null to prevent terminal interference
+            cmd.stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .stdin(Stdio::null());
+
+            cmd.spawn()
+        })
+        .await
+        .with_context(|| "Failed to spawn blocking task")?
+        .with_context(|| format!("Failed to start player: {}", self.config.command))?;
+
+        // Store the process handle - minimize lock time
+        {
+            let mut process_guard = self.current_process.lock().await;
+            *process_guard = Some(child);
+        }
 
         Ok(())
     }
@@ -141,8 +158,8 @@ impl Player {
         if let Some(mut child) = process_guard.take() {
             // Try to kill the process
             let _ = child.kill();
-            // Wait for it to finish
-            let _ = child.wait();
+            // Don't wait - just let it terminate in the background
+            // child.wait() would block the TUI
         }
         Ok(())
     }

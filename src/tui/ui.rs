@@ -98,40 +98,59 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
+    let title = if !app.search_query.is_empty() && !app.search_active {
+        format!(" Content (Filtered: \"{}\") ", app.search_query)
+    } else if app.search_active {
+        format!(" Content (Search: {}_) ", app.search_query)
+    } else {
+        " Content ".to_string()
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::White))
-        .title(" Content ");
+        .title(title);
 
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    if app.items.is_empty() {
-        let empty_msg = Paragraph::new("No items to display")
-            .style(Style::default().fg(Color::DarkGray))
-            .alignment(Alignment::Center);
+    // Get the items to display based on filter
+    let display_indices: Vec<usize> = if app.filtered_indices.is_empty() {
+        (0..app.items.len()).collect()
+    } else {
+        app.filtered_indices.clone()
+    };
+
+    if display_indices.is_empty() {
+        let empty_msg = Paragraph::new(if app.search_active || !app.search_query.is_empty() {
+            "No items match the search"
+        } else {
+            "No items to display"
+        })
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
         frame.render_widget(empty_msg, inner_area);
         return;
     }
 
-    // Calculate visible range
+    // Calculate visible range based on filtered items
     let visible_height = inner_area.height as usize;
-    // Ensure scroll_offset is valid for current list
-    let start = app.scroll_offset.min(app.items.len().saturating_sub(1));
-    let end = (start + visible_height).min(app.items.len());
+    let start = app
+        .scroll_offset
+        .min(display_indices.len().saturating_sub(1));
+    let end = (start + visible_height).min(display_indices.len());
 
     // Safety check to prevent panic
-    if start > app.items.len() {
+    if start > display_indices.len() {
         return;
     }
 
     // Create list items with selection highlighting
-    let items: Vec<ListItem> = app.items[start..end]
+    let items: Vec<ListItem> = display_indices[start..end]
         .iter()
-        .enumerate()
-        .map(|(i, item)| {
-            let index = start + i;
-            let content = if index == app.selected_index {
+        .map(|&item_idx| {
+            let item = &app.items[item_idx];
+            let content = if item_idx == app.selected_index {
                 Line::from(vec![Span::raw(" ▶ "), Span::raw(item)]).style(
                     Style::default()
                         .fg(Color::Yellow)
@@ -149,12 +168,12 @@ fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(list, inner_area);
 
     // Draw scrollbar if needed
-    if app.items.len() > visible_height {
+    if display_indices.len() > visible_height {
         draw_scrollbar(
             frame,
             inner_area,
             app.scroll_offset,
-            app.items.len(),
+            display_indices.len(),
             visible_height,
         );
     }
@@ -229,13 +248,6 @@ fn draw_info_panel(frame: &mut Frame, app: &App, area: Rect) {
                 Line::from(""),
                 Line::from("Press 'f' to toggle favourite"),
                 Line::from("Press '?' for help"),
-            ]
-        }
-        AppState::Playing(_) => {
-            vec![
-                Line::from(""),
-                Line::from("Press 's' or ESC to stop"),
-                Line::from(""),
             ]
         }
         _ => {

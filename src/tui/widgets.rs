@@ -60,8 +60,9 @@ pub fn create_help_widget() -> Paragraph<'static> {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )]),
+        Line::from("  /       - Fuzzy search/filter list"),
         Line::from("  f       - Toggle favourite (in stream/favourite lists)"),
-        Line::from("  s       - Stop playback (when playing)"),
+        Line::from("  s       - Stop any active playback"),
         Line::from("  ?/F1    - Toggle this help"),
         Line::from("  Ctrl+C  - Force quit"),
         Line::from(""),
