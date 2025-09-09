@@ -1259,9 +1259,10 @@ impl App {
                     ];
                     
                     if let Some(ref plot) = vod_info.info.plot {
-                        if !plot.trim().is_empty() {
+                        let plot_trimmed = plot.trim();
+                        if !plot_trimmed.is_empty() {
                             items.push("📝 Description:".to_string());
-                            items.extend(wrap_text(plot, 75, "   "));
+                            items.extend(wrap_text(plot_trimmed, 75, "   "));
                             items.push(String::new());
                         }
                     }
@@ -1291,20 +1292,22 @@ impl App {
                     }
                     
                     if let Some(ref cast) = vod_info.info.cast {
-                        if !cast.trim().is_empty() {
+                        let cast_trimmed = cast.trim();
+                        if !cast_trimmed.is_empty() {
                             items.push("👥 Cast:".to_string());
-                            items.extend(wrap_text(cast, 75, "   "));
+                            items.extend(wrap_text(cast_trimmed, 75, "   "));
                         }
                     }
                     
                     if let Some(ref director) = vod_info.info.director {
-                        if !director.trim().is_empty() {
+                        let director_trimmed = director.trim();
+                        if !director_trimmed.is_empty() {
                             // Wrap director if it's too long
-                            if director.len() > 60 {
+                            if director_trimmed.len() > 60 {
                                 items.push("🎬 Director:".to_string());
-                                items.extend(wrap_text(director, 75, "   "));
+                                items.extend(wrap_text(director_trimmed, 75, "   "));
                             } else {
-                                items.push(format!("🎬 Director: {}", director));
+                                items.push(format!("🎬 Director: {}", director_trimmed));
                             }
                         }
                     }
