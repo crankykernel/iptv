@@ -90,19 +90,27 @@ pub struct UserInfo {
     pub message: String,
     pub auth: u8,
     pub status: String,
+    #[serde(deserialize_with = "deserialize_number_as_string")]
     pub exp_date: String,
+    #[serde(deserialize_with = "deserialize_number_as_string")]
     pub is_trial: String,
+    #[serde(deserialize_with = "deserialize_number_as_string")]
     pub active_cons: String,
+    #[serde(deserialize_with = "deserialize_number_as_string")]
     pub created_at: String,
+    #[serde(deserialize_with = "deserialize_number_as_string")]
     pub max_connections: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfo {
     pub url: String,
+    #[serde(deserialize_with = "deserialize_number_as_string")]
     pub port: String,
+    #[serde(deserialize_with = "deserialize_number_as_string")]
     pub https_port: String,
     pub server_protocol: String,
+    #[serde(deserialize_with = "deserialize_number_as_string")]
     pub rtmp_port: String,
     pub timezone: String,
     pub timestamp_now: u64,
