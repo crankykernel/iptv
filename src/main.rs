@@ -232,15 +232,15 @@ async fn main() -> Result<()> {
 
     // Initialize tracing
     let filter = if cli.verbose {
-        EnvFilter::new("debug")
+        EnvFilter::new("debug,reqwest=warn,h2=warn,hyper=warn")
     } else {
-        EnvFilter::new("info")
+        EnvFilter::new("info,reqwest=warn,h2=warn,hyper=warn")
     };
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
-        .with_level(false)
+        .with_level(true)
         .without_time()
         .init();
 

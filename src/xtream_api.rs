@@ -46,6 +46,37 @@ where
     }
 }
 
+fn deserialize_number_as_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let value: Value = Deserialize::deserialize(deserializer)?;
+
+    match value {
+        Value::String(s) => Ok(s),
+        Value::Number(n) => Ok(n.to_string()),
+        _ => Err(D::Error::custom("Expected string or number")),
+    }
+}
+
+fn deserialize_optional_number_as_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let value: Value = Deserialize::deserialize(deserializer)?;
+
+    match value {
+        Value::Null => Ok(None),
+        Value::String(s) => Ok(Some(s)),
+        Value::Number(n) => Ok(Some(n.to_string())),
+        _ => Err(D::Error::custom("Expected string, number, or null")),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserInfoResponse {
     pub user_info: UserInfo,
@@ -157,7 +188,7 @@ pub struct SeriesInfo {
     pub release_date: Option<String>,
     #[serde(default)]
     pub last_modified: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_number_as_string")]
     pub rating: Option<String>,
     #[serde(default)]
     pub rating_5based: Option<Value>,
@@ -196,6 +227,38 @@ pub struct SeriesInfo {
     pub tmdb: Option<String>,
 }
 
+// Series info object that comes inside the series detail response (without series_id)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeriesDetailInfo {
+    pub name: String,
+    #[serde(default)]
+    pub cover: Option<String>,
+    #[serde(default)]
+    pub plot: Option<String>,
+    #[serde(default)]
+    pub cast: Option<String>,
+    #[serde(default)]
+    pub director: Option<String>,
+    #[serde(default)]
+    pub genre: Option<String>,
+    #[serde(default, rename = "releaseDate")]
+    pub release_date: Option<String>,
+    #[serde(default)]
+    pub last_modified: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_number_as_string")]
+    pub rating: Option<String>,
+    #[serde(default)]
+    pub rating_5based: Option<Value>,
+    #[serde(default, deserialize_with = "deserialize_string_or_vec")]
+    pub backdrop_path: Option<Vec<String>>,
+    #[serde(default)]
+    pub youtube_trailer: Option<String>,
+    #[serde(default)]
+    pub episode_run_time: Option<String>,
+    #[serde(default)]
+    pub category_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Episode {
     pub id: String,
@@ -229,16 +292,63 @@ pub struct EpisodeInfo {
     pub duration: Option<String>,
     #[serde(default)]
     pub movie_image: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_number_as_string")]
     pub rating: Option<String>,
 }
 
+// Actual API response structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SeriesInfoDetailed {
-    pub info: SeriesInfo,
-    pub seasons: Vec<Season>,
+pub struct SeriesInfoResponse {
+    #[serde(default)]
+    pub info: Option<SeriesDetailInfo>, // Use the new struct without series_id
+    #[serde(default)]
+    pub seasons: Vec<ApiSeason>, // Direct seasons array
+    #[serde(default)]
+    pub episodes: Option<std::collections::HashMap<String, Vec<ApiEpisode>>>, // Episodes by season
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiSeason {
+    pub name: String,
+    #[serde(deserialize_with = "deserialize_number_as_string")]
+    pub episode_count: String,
+    #[serde(default)]
+    pub overview: Option<String>,
+    #[serde(default)]
+    pub air_date: Option<String>,
+    #[serde(default)]
+    pub cover: Option<String>,
+    #[serde(default)]
+    pub cover_tmdb: Option<String>,
+    pub season_number: u32,
+    #[serde(default)]
+    pub cover_big: Option<String>,
+    #[serde(default, rename = "releaseDate")]
+    pub release_date: Option<String>,
+    #[serde(default)]
+    pub duration: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiEpisode {
+    pub id: String,
+    pub episode_num: u32,
+    pub title: String,
+    #[serde(default)]
+    pub container_extension: Option<String>,
+    #[serde(default)]
+    pub info: Option<EpisodeInfo>,
+    #[serde(default)]
+    pub custom_sid: Option<String>,
+    #[serde(default)]
+    pub added: Option<String>,
+    #[serde(default)]
+    pub season: u32,
+    #[serde(default)]
+    pub direct_source: Option<String>,
+}
+
+// Keep the old structures for compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Season {
     #[serde(default)]
@@ -760,12 +870,12 @@ impl XTreamAPI {
         Ok(result_series)
     }
 
-    pub async fn get_series_info(&mut self, series_id: u32) -> Result<SeriesInfoDetailed> {
+    pub async fn get_series_info(&mut self, series_id: u32) -> Result<SeriesInfoResponse> {
         // Try to get from cache first
         let cache_key = format!("series_info_{}", series_id);
         if let Ok(Some(cached)) = self
             .cache_manager
-            .get_cached::<SeriesInfoDetailed>(&self.provider_hash, &cache_key, None)
+            .get_cached::<SeriesInfoResponse>(&self.provider_hash, &cache_key, None)
             .await
         {
             return Ok(cached.data);
@@ -784,7 +894,7 @@ impl XTreamAPI {
                 .unwrap()
                 .tick_strings(&["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"]),
         );
-        pb.set_message(format!("Fetching series info..."));
+        pb.set_message("Fetching series info...".to_string());
         pb.enable_steady_tick(Duration::from_millis(120));
 
         let response = self.client.get(&url).send().await?;
@@ -796,8 +906,20 @@ impl XTreamAPI {
             return Err(anyhow::anyhow!("Empty response from server"));
         }
 
-        let series_data: SeriesInfoDetailed = serde_json::from_str(&response_text).map_err(|e| {
+        // Log response for debugging
+        debug!("Series info response: {}", if response_text.len() > 1000 { 
+            format!("{}... (truncated, {} bytes total)", &response_text[..1000], response_text.len()) 
+        } else { 
+            response_text.clone() 
+        });
+
+        let series_data: SeriesInfoResponse = serde_json::from_str(&response_text).map_err(|e| {
             warn!("JSON parsing error for series info: {}", e);
+            warn!("Response content: {}", if response_text.len() > 200 { 
+                format!("{}... (truncated)", &response_text[..200]) 
+            } else { 
+                response_text.clone() 
+            });
             anyhow::anyhow!("Failed to parse series info: {}", e)
         })?;
 

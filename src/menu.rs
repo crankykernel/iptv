@@ -3,12 +3,12 @@
 
 use crate::config::ProviderConfig;
 use crate::player::Player;
-use crate::xtream_api::{Category, XTreamAPI};
+use crate::xtream_api::{Category, XTreamAPI, Episode, Season};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use inquire::Select;
 use std::collections::HashMap;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 pub struct MenuSystem {
     providers: Vec<ProviderConfig>,
@@ -764,25 +764,35 @@ impl MenuSystem {
 
         // Get detailed series info with episodes
         let series_info = api.get_series_info(series_id).await?;
+        
+        debug!("Series info parsed: {} seasons, episodes present: {}", 
+               series_info.seasons.len(), series_info.episodes.is_some());
 
         // Display series info
-        println!("\n=== {} ===", series_info.info.name);
-        if let Some(ref plot) = series_info.info.plot {
-            println!("Plot: {}", plot);
-        }
-        if let Some(ref genre) = series_info.info.genre {
-            println!("Genre: {}", genre);
-        }
-        if let Some(ref release_date) = series_info.info.release_date {
-            println!("Release: {}", release_date);
-        }
-        if let Some(ref rating) = series_info.info.rating {
-            println!("Rating: {}", rating);
+        let series_name = if let Some(ref info) = series_info.info {
+            &info.name
+        } else {
+            "Unknown Series"
+        };
+        println!("\n=== {} ===", series_name);
+        if let Some(ref info) = series_info.info {
+            if let Some(ref plot) = info.plot {
+                println!("Plot: {}", plot);
+            }
+            if let Some(ref genre) = info.genre {
+                println!("Genre: {}", genre);
+            }
+            if let Some(ref release_date) = info.release_date {
+                println!("Release: {}", release_date);
+            }
+            if let Some(ref rating) = info.rating {
+                println!("Rating: {}", rating);
+            }
         }
         println!();
 
         if series_info.seasons.is_empty() {
-            println!("No episodes found for this series.");
+            println!("No seasons found for this series.");
             println!("Press Enter to continue...");
             std::io::stdin().read_line(&mut String::new()).ok();
             return Ok(());
@@ -791,17 +801,12 @@ impl MenuSystem {
         // Browse seasons and episodes
         let mut last_selected_season = 0;
         loop {
-            // Create season options
-            let season_options: Vec<String> = series_info
-                .seasons
+            // Create season options from API response
+            let season_options: Vec<String> = series_info.seasons
                 .iter()
                 .map(|season| {
-                    let episodes_count = season.episodes.len();
-                    if let Some(ref name) = season.name {
-                        format!("Season {} - {} ({} episodes)", season.season_number, name, episodes_count)
-                    } else {
-                        format!("Season {} ({} episodes)", season.season_number, episodes_count)
-                    }
+                    let episode_count = season.episode_count.parse::<u32>().unwrap_or(0);
+                    format!("Season {} - {} ({} episodes)", season.season_number, season.name, episode_count)
                 })
                 .collect();
 
@@ -826,10 +831,43 @@ impl MenuSystem {
                     // Find selected season index
                     if let Some(season_index) = season_options.iter().position(|opt| *opt == selection) {
                         last_selected_season = season_index;
-                        let selected_season = &series_info.seasons[season_index];
+                        let selected_api_season = &series_info.seasons[season_index];
+                        
+                        // Convert API season to internal format
+                        let episodes = if let Some(ref episodes_map) = series_info.episodes {
+                            // Try to get episodes by season number
+                            let season_key = &selected_api_season.season_number.to_string();
+                            debug!("Looking for episodes in season key: {}", season_key);
+                            debug!("Available episode keys: {:?}", episodes_map.keys().collect::<Vec<_>>());
+                            
+                            episodes_map.get(season_key)
+                                .unwrap_or(&Vec::new())
+                                .iter()
+                                .map(|api_ep| Episode {
+                                    id: api_ep.id.clone(),
+                                    episode_num: api_ep.episode_num,
+                                    title: api_ep.title.clone(),
+                                    container_extension: api_ep.container_extension.clone(),
+                                    info: api_ep.info.clone(),
+                                    custom_sid: api_ep.custom_sid.clone(),
+                                    added: api_ep.added.clone(),
+                                    season: api_ep.season,
+                                    direct_source: api_ep.direct_source.clone(),
+                                })
+                                .collect()
+                        } else {
+                            debug!("No episodes map in response, might need separate API call");
+                            Vec::new()
+                        };
+                        
+                        let season = Season {
+                            season_number: selected_api_season.season_number,
+                            name: Some(selected_api_season.name.clone()),
+                            episodes,
+                        };
                         
                         // Browse episodes in this season
-                        self.browse_season_episodes(selected_season, &series_info.info.name).await?;
+                        self.browse_season_episodes(&season, series_name).await?;
                     }
                 }
                 None => break,
@@ -949,20 +987,18 @@ impl MenuSystem {
         )
         .prompt_skippable()?;
 
-        match action_selection {
-            Some("▶ Play Episode") => {
-                let api = self
-                    .current_api
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
+        if let Some("▶ Play Episode") = action_selection {
+            let api = self
+                .current_api
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
 
-                let stream_url = api.get_episode_stream_url(&episode.id, episode.container_extension.as_deref());
-                println!("Playing: {} - Episode {}", series_name, episode.episode_num);
-                
-                self.player.play(&stream_url)?;
-            }
-            _ => {} // Back
+            let stream_url = api.get_episode_stream_url(&episode.id, episode.container_extension.as_deref());
+            println!("Playing: {} - Episode {}", series_name, episode.episode_num);
+            
+            self.player.play(&stream_url)?;
         }
+        // Back - do nothing
 
         Ok(())
     }
