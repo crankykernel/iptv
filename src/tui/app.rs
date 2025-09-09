@@ -71,7 +71,7 @@ impl App {
             items.extend(
                 providers
                     .iter()
-                    .map(|p| format!("📡 {}", p.name.clone().unwrap_or_else(|| p.url.clone())))
+                    .map(|p| format!("📡 {}", p.name.clone().unwrap_or_else(|| p.url.clone()))),
             );
             items
         } else {
@@ -87,7 +87,7 @@ impl App {
         };
 
         let filtered_indices = (0..items.len()).collect();
-        
+
         Self {
             state,
             providers,
@@ -329,20 +329,26 @@ impl App {
                 KeyCode::End => self.move_selection_end(),
                 KeyCode::Enter => {
                     if self.selected_index < self.cross_provider_favourites.len() {
-                        let (favourite, provider) = self.cross_provider_favourites[self.selected_index].clone();
-                        
+                        let (favourite, provider) =
+                            self.cross_provider_favourites[self.selected_index].clone();
+
                         // Connect to provider silently if needed (without changing state)
-                        if self.current_api.is_none() || 
-                           self.current_api.as_ref().unwrap().provider_hash != 
-                           crate::XTreamAPI::new(provider.url.clone(), provider.username.clone(),
-                                                provider.password.clone(), provider.name.clone())
-                                                .unwrap().provider_hash {
-                            
+                        if self.current_api.is_none()
+                            || self.current_api.as_ref().unwrap().provider_hash
+                                != crate::XTreamAPI::new(
+                                    provider.url.clone(),
+                                    provider.username.clone(),
+                                    provider.password.clone(),
+                                    provider.name.clone(),
+                                )
+                                .unwrap()
+                                .provider_hash
+                        {
                             self.add_log(format!(
                                 "Connecting to provider: {}",
                                 provider.name.as_ref().unwrap_or(&provider.url)
                             ));
-                            
+
                             match crate::XTreamAPI::new(
                                 provider.url.clone(),
                                 provider.username.clone(),
@@ -354,13 +360,14 @@ impl App {
                                     self.add_log("Successfully connected to provider".to_string());
                                 }
                                 Err(e) => {
-                                    self.state = AppState::Error(format!("Failed to connect: {}", e));
+                                    self.state =
+                                        AppState::Error(format!("Failed to connect: {}", e));
                                     self.add_log(format!("Connection failed: {}", e));
                                     return None;
                                 }
                             }
                         }
-                        
+
                         // Play the favourite using TUI-specific method
                         if let Some(api) = &self.current_api {
                             let stream_url = api.get_stream_url(
@@ -368,12 +375,13 @@ impl App {
                                 &favourite.stream_type,
                                 None,
                             );
-                            
+
                             self.add_log(format!("Playing: {}", favourite.name));
-                            
+
                             // Use TUI-specific play method that runs in background
                             if let Err(e) = self.player.play_tui(&stream_url).await {
-                                self.state = AppState::Error(format!("Failed to play favourite: {}", e));
+                                self.state =
+                                    AppState::Error(format!("Failed to play favourite: {}", e));
                                 self.add_log(format!("Playback failed: {}", e));
                             } else {
                                 self.add_log("Player started in background window".to_string());
@@ -385,7 +393,8 @@ impl App {
                 }
                 KeyCode::Char('f') => {
                     if self.selected_index < self.cross_provider_favourites.len() {
-                        let (favourite, provider) = &self.cross_provider_favourites[self.selected_index];
+                        let (favourite, provider) =
+                            &self.cross_provider_favourites[self.selected_index];
                         let favourites_manager = match crate::FavouritesManager::new() {
                             Ok(fm) => fm,
                             Err(e) => {
@@ -393,7 +402,7 @@ impl App {
                                 return None;
                             }
                         };
-                        
+
                         let api = match crate::XTreamAPI::new(
                             provider.url.clone(),
                             provider.username.clone(),
@@ -406,15 +415,15 @@ impl App {
                                 return None;
                             }
                         };
-                        
+
                         let _ = favourites_manager.remove_favourite(
                             &api.provider_hash,
                             favourite.stream_id,
                             &favourite.stream_type,
                         );
-                        
+
                         self.add_log(format!("Removed {} from favourites", favourite.name));
-                        
+
                         // Reload the cross-provider favourites
                         self.load_all_favourites().await;
                     }
@@ -611,7 +620,7 @@ impl App {
         items.extend(
             self.providers
                 .iter()
-                .map(|p| format!("📡 {}", p.name.clone().unwrap_or_else(|| p.url.clone())))
+                .map(|p| format!("📡 {}", p.name.clone().unwrap_or_else(|| p.url.clone()))),
         );
         self.items = items;
         self.reset_filter();
@@ -858,7 +867,7 @@ impl App {
     async fn load_all_favourites(&mut self) {
         self.state = AppState::Loading("Loading all favourites...".to_string());
         self.add_log("Loading favourites from all providers".to_string());
-        
+
         let favourites_manager = match crate::FavouritesManager::new() {
             Ok(fm) => fm,
             Err(e) => {
@@ -866,10 +875,10 @@ impl App {
                 return;
             }
         };
-        
+
         let mut all_favourites = Vec::new();
         let mut all_items = Vec::new();
-        
+
         // Collect favourites from all providers
         let providers = self.providers.clone();
         for provider in &providers {
@@ -885,13 +894,15 @@ impl App {
                     continue;
                 }
             };
-            
+
             match favourites_manager.get_favourites(&api.provider_hash) {
                 Ok(favs) => {
                     for fav in favs {
-                        let provider_name = provider.name.as_ref()
-                            .unwrap_or(&provider.url);
-                        all_items.push(format!("[{}] {} [{}]", fav.stream_type, fav.name, provider_name));
+                        let provider_name = provider.name.as_ref().unwrap_or(&provider.url);
+                        all_items.push(format!(
+                            "[{}] {} [{}]",
+                            fav.stream_type, fav.name, provider_name
+                        ));
                         all_favourites.push((fav, provider.clone()));
                     }
                 }
@@ -900,21 +911,21 @@ impl App {
                 }
             }
         }
-        
+
         if all_favourites.is_empty() {
             self.state = AppState::Error("No favourites found across any provider".to_string());
             return;
         }
-        
+
         // Store the cross-provider favourites
         self.cross_provider_favourites = all_favourites;
         self.items = all_items;
         self.reset_filter();
-        
+
         self.state = AppState::CrossProviderFavourites;
         self.selected_index = 0;
         self.scroll_offset = 0;
-        
+
         self.add_log(format!("Loaded {} favourites", self.items.len()));
     }
 
