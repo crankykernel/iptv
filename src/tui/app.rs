@@ -103,6 +103,20 @@ impl App {
 
     pub fn tick(&mut self) {
         // Update any time-based UI elements here
+        
+        // Check if player is still running when in Playing state
+        if matches!(self.state, AppState::Playing(_)) {
+            let player = self.player.clone();
+            
+            // Check player status asynchronously
+            tokio::spawn(async move {
+                if !player.is_playing_tui().await {
+                    // Player has stopped, but we can't update state from here
+                    // This would need a channel or shared state mechanism
+                    // For now, the user needs to press 's' or Esc to return
+                }
+            });
+        }
     }
 
     pub async fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {
@@ -569,9 +583,14 @@ impl App {
                 if stream.stream_type == "live" { "live" } else { "movie" },
                 stream.container_extension.as_deref(),
             );
-            if let Err(e) = self.player.play(&url) {
+            
+            // Use TUI-specific play method that runs in background
+            if let Err(e) = self.player.play_tui(&url).await {
                 self.state = AppState::Error(format!("Failed to play stream: {}", e));
                 self.add_log(format!("Playback failed: {}", e));
+            } else {
+                self.add_log("Player started in background window".to_string());
+                self.add_log("Press 's' or Esc to stop playback".to_string());
             }
         }
     }
@@ -588,9 +607,13 @@ impl App {
                 episode.container_extension.as_deref(),
             );
             
-            if let Err(e) = self.player.play(&url) {
+            // Use TUI-specific play method that runs in background
+            if let Err(e) = self.player.play_tui(&url).await {
                 self.state = AppState::Error(format!("Failed to play episode: {}", e));
                 self.add_log(format!("Playback failed: {}", e));
+            } else {
+                self.add_log("Player started in background window".to_string());
+                self.add_log("Press 's' or Esc to stop playback".to_string());
             }
         }
     }
@@ -608,15 +631,24 @@ impl App {
                 None,
             );
             
-            if let Err(e) = self.player.play(&url) {
+            // Use TUI-specific play method that runs in background
+            if let Err(e) = self.player.play_tui(&url).await {
                 self.state = AppState::Error(format!("Failed to play favourite: {}", e));
                 self.add_log(format!("Playback failed: {}", e));
+            } else {
+                self.add_log("Player started in background window".to_string());
+                self.add_log("Press 's' or Esc to stop playback".to_string());
             }
         }
     }
 
     fn stop_playing(&mut self) {
-        // Player will stop when the user closes the player window
+        // Stop the player process
+        let player = self.player.clone();
+        tokio::spawn(async move {
+            let _ = player.stop_tui().await;
+        });
+        
         self.state = AppState::MainMenu;
         self.selected_index = 0;
         self.update_main_menu_items();

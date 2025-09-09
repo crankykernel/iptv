@@ -3,15 +3,30 @@
 
 use crate::config::PlayerConfig;
 use anyhow::{Context, Result};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub struct Player {
     config: PlayerConfig,
+    current_process: Arc<Mutex<Option<Child>>>,
+}
+
+impl Clone for Player {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            current_process: Arc::new(Mutex::new(None)),
+        }
+    }
 }
 
 impl Player {
     pub fn new(config: PlayerConfig) -> Self {
-        Self { config }
+        Self { 
+            config,
+            current_process: Arc::new(Mutex::new(None)),
+        }
     }
 
     pub fn play(&self, url: &str) -> Result<()> {
@@ -80,5 +95,81 @@ impl Player {
             .status()
             .map(|status| status.success())
             .unwrap_or(false)
+    }
+
+    /// Play video for TUI mode - runs in background with no terminal output
+    pub async fn play_tui(&self, url: &str) -> Result<()> {
+        // Stop any existing playback first
+        self.stop_tui().await?;
+        
+        let mut cmd = Command::new(&self.config.command);
+        
+        // Add configured arguments
+        for arg in &self.config.args {
+            cmd.arg(arg);
+        }
+        
+        // Add arguments to suppress terminal output and run in pseudo-gui mode
+        // These work for mpv - might need adjustment for other players
+        cmd.arg("--no-terminal");
+        cmd.arg("--force-window=yes");
+        cmd.arg("--keep-open=no");
+        
+        // Add the URL
+        cmd.arg(url);
+        
+        // Redirect all output to null to prevent terminal interference
+        cmd.stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .stdin(Stdio::null());
+        
+        // Spawn the process
+        let child = cmd.spawn().with_context(|| {
+            format!("Failed to start player: {}", self.config.command)
+        })?;
+        
+        // Store the process handle
+        let mut process_guard = self.current_process.lock().await;
+        *process_guard = Some(child);
+        
+        Ok(())
+    }
+    
+    /// Stop TUI playback
+    pub async fn stop_tui(&self) -> Result<()> {
+        let mut process_guard = self.current_process.lock().await;
+        if let Some(mut child) = process_guard.take() {
+            // Try to kill the process
+            let _ = child.kill();
+            // Wait for it to finish
+            let _ = child.wait();
+        }
+        Ok(())
+    }
+    
+    /// Check if player is currently running in TUI mode
+    pub async fn is_playing_tui(&self) -> bool {
+        let mut process_guard = self.current_process.lock().await;
+        if let Some(child) = process_guard.as_mut() {
+            // Check if process is still running
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    // Process has exited
+                    *process_guard = None;
+                    false
+                }
+                Ok(None) => {
+                    // Still running
+                    true
+                }
+                Err(_) => {
+                    // Error checking status
+                    *process_guard = None;
+                    false
+                }
+            }
+        } else {
+            false
+        }
     }
 }
