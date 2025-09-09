@@ -614,51 +614,49 @@ impl MenuSystem {
 
                 let selected_stream = &streams[stream_index];
 
-                // Check if stream is already a favourite
-                let api = self
-                    .current_api
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
-
-                let is_fav = api
-                    .cache_manager
-                    .is_favourite(&api.provider_hash, selected_stream.stream_id, stream_type)
-                    .await;
-
-                // Show action menu
-                let mut actions = vec!["▶ Play Stream"];
-                if stream_type == "live" {
-                    // Only allow favourites for live streams for now
-                    if is_fav {
-                        actions.push("🗑 Remove from Favourites");
-                    } else {
-                        actions.push("⭐ Add to Favourites");
+                if stream_type == "movie" {
+                    // For movies, show info directly without the action menu
+                    match self.handle_movie_playback(selected_stream.stream_id, &selected_stream.name).await {
+                        Ok(_) => {},
+                        Err(e) => {
+                            println!("Movie playback error: {}", e);
+                        }
                     }
-                }
+                } else {
+                    // For live streams, show the action menu
+                    let api = self
+                        .current_api
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
 
-                let action_selection =
-                    Select::new(&format!("Action for '{}':", selected_stream.name), actions)
-                        .prompt_skippable()?;
+                    let is_fav = api
+                        .cache_manager
+                        .is_favourite(&api.provider_hash, selected_stream.stream_id, stream_type)
+                        .await;
 
-                match action_selection {
-                    Some("▶ Play Stream") => {
-                        if stream_type == "movie" {
-                            // For movies, get VOD info first to get proper extension and show description
-                            match self.handle_movie_playback(selected_stream.stream_id, &selected_stream.name).await {
-                                Ok(_) => {},
-                                Err(e) => {
-                                    println!("Movie playback error: {}", e);
-                                }
-                            }
+                    // Show action menu
+                    let mut actions = vec!["▶ Play Stream"];
+                    if stream_type == "live" {
+                        // Only allow favourites for live streams for now
+                        if is_fav {
+                            actions.push("🗑 Remove from Favourites");
                         } else {
-                            // For live streams, use the existing logic
+                            actions.push("⭐ Add to Favourites");
+                        }
+                    }
+
+                    let action_selection =
+                        Select::new(&format!("Action for '{}':", selected_stream.name), actions)
+                            .prompt_skippable()?;
+
+                    match action_selection {
+                        Some("▶ Play Stream") => {
                             let url = api.get_stream_url(selected_stream.stream_id, stream_type, None);
                             println!("Playing: {}", selected_stream.name);
                             if let Err(e) = self.player.play(&url) {
                                 println!("Playback error: {}", e);
                             }
                         }
-                    }
                     Some("⭐ Add to Favourites") => {
                         let api_mut = self
                             .current_api
@@ -702,6 +700,7 @@ impl MenuSystem {
                         println!("Removed '{}' from favourites", selected_stream.name);
                     }
                     _ => {} // Back/Cancel
+                    }
                 }
             } else {
                 break; // Go back
@@ -1049,27 +1048,22 @@ impl MenuSystem {
             }
         };
 
+        // Get terminal width for text wrapping
+        let terminal_width = terminal_size::terminal_size()
+            .map(|(w, _)| w.0 as usize)
+            .unwrap_or(80);
+
         // Display movie information
         println!("\n=== {} ===", vod_info.info.name);
         
         if let Some(ref plot) = vod_info.info.plot {
-            println!("Description: {}", plot);
+            println!("Description:");
+            Self::print_wrapped(plot, terminal_width);
+            println!();
         }
         
         if let Some(ref genre) = vod_info.info.genre {
             println!("Genre: {}", genre);
-        }
-        
-        if let Some(ref director) = vod_info.info.director {
-            println!("Director: {}", director);
-        }
-        
-        if let Some(ref cast) = vod_info.info.cast {
-            println!("Cast: {}", cast);
-        }
-        
-        if let Some(ref rating) = vod_info.info.rating {
-            println!("Rating: {}", rating);
         }
         
         if let Some(ref release_date) = vod_info.info.releasedate {
@@ -1119,6 +1113,30 @@ impl MenuSystem {
         }
 
         Ok(())
+    }
+
+    fn print_wrapped(text: &str, width: usize) {
+        let indent = "  ";
+        let effective_width = width.saturating_sub(indent.len());
+        
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let mut current_line = String::new();
+        
+        for word in words {
+            if current_line.is_empty() {
+                current_line = word.to_string();
+            } else if current_line.len() + 1 + word.len() <= effective_width {
+                current_line.push(' ');
+                current_line.push_str(word);
+            } else {
+                println!("{}{}", indent, current_line);
+                current_line = word.to_string();
+            }
+        }
+        
+        if !current_line.is_empty() {
+            println!("{}{}", indent, current_line);
+        }
     }
 
     async fn clear_cache(&mut self) -> Result<()> {
