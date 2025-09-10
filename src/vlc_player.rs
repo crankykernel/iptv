@@ -29,8 +29,16 @@ impl VlcPlayer {
     pub async fn launch(&mut self) -> Result<()> {
         debug!("Launching VLC with HTTP interface on port {}", self.port);
         
-        // Kill any existing VLC process
-        self.stop().await?;
+        // Check if VLC is already running
+        if self.is_interface_ready().await {
+            debug!("VLC is already running, skipping launch");
+            return Ok(());
+        }
+        
+        // Only stop if we have an existing process that's not responding
+        if self.vlc_process.is_some() {
+            self.stop().await?;
+        }
 
         // Start VLC with HTTP interface
         let mut cmd = Command::new("vlc");
@@ -87,8 +95,17 @@ impl VlcPlayer {
             .send()
             .await
         {
-            Ok(response) => response.status().is_success(),
-            Err(_) => false,
+            Ok(response) => {
+                let is_success = response.status().is_success();
+                if !is_success {
+                    debug!("VLC HTTP interface returned status: {}", response.status());
+                }
+                is_success
+            }
+            Err(e) => {
+                debug!("VLC HTTP interface check failed: {}", e);
+                false
+            }
         }
     }
 
@@ -204,22 +221,9 @@ impl VlcPlayer {
 
     /// Check if VLC is running
     pub async fn is_running(&mut self) -> bool {
-        if let Some(child) = self.vlc_process.as_mut() {
-            match child.try_wait() {
-                Ok(Some(_)) => {
-                    // Process has exited
-                    self.vlc_process = None;
-                    false
-                }
-                Ok(None) => {
-                    // Still running, check HTTP interface
-                    self.is_interface_ready().await
-                }
-                Err(_) => false,
-            }
-        } else {
-            false
-        }
+        // Simply check if the HTTP interface is responding
+        // The process field might be None but VLC could still be running
+        self.is_interface_ready().await
     }
 
     /// Pause playback

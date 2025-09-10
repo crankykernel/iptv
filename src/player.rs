@@ -118,9 +118,12 @@ impl Player {
 
             // Check if we need to initialize or restart VLC
             let needs_restart = if let Some(vlc) = vlc_guard.as_mut() {
-                // Check if VLC is still running
-                !vlc.is_running().await
+                // Check if the HTTP interface is still responding
+                let is_running = vlc.is_running().await;
+                debug!("VLC is_running check returned: {}", is_running);
+                !is_running
             } else {
+                debug!("No VLC instance found in guard");
                 true
             };
 
