@@ -9,8 +9,11 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub providers: Vec<ProviderConfig>,
+    #[serde(default)]
     pub player: PlayerConfig,
+    #[serde(default)]
     pub cache: CacheConfig,
+    #[serde(default)]
     pub ui: UiConfig,
 }
 
@@ -45,6 +48,32 @@ impl Default for VlcConfig {
     }
 }
 
+impl Default for PlayerConfig {
+    fn default() -> Self {
+        Self {
+            command: "vlc".to_string(),
+            args: vec![],
+            vlc: VlcConfig::default(),
+        }
+    }
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self { max_entries: 1000 }
+    }
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            page_size: 20,
+            search_debounce_ms: 300,
+            filter_english_only_series: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
     pub max_entries: usize,
@@ -67,17 +96,9 @@ impl Default for Config {
                 username: "your-username".to_string(),
                 password: "your-password".to_string(),
             }],
-            player: PlayerConfig {
-                command: "vlc".to_string(),
-                args: vec![],
-                vlc: VlcConfig::default(),
-            },
-            cache: CacheConfig { max_entries: 1000 },
-            ui: UiConfig {
-                page_size: 20,
-                search_debounce_ms: 300,
-                filter_english_only_series: false,
-            },
+            player: PlayerConfig::default(),
+            cache: CacheConfig::default(),
+            ui: UiConfig::default(),
         }
     }
 }
