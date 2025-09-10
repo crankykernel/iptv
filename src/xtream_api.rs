@@ -421,7 +421,6 @@ pub struct Season {
     pub episodes: Vec<Episode>,
 }
 
-#[derive(Debug)]
 pub struct XTreamAPI {
     client: Client,
     base_url: String,
@@ -431,6 +430,21 @@ pub struct XTreamAPI {
     pub cache_manager: CacheManager,
     pub favourites_manager: FavouritesManager,
     pub provider_hash: String,
+    pub logger: Option<Box<dyn Fn(String) + Send + Sync>>,
+    pub show_progress: bool,
+}
+
+impl std::fmt::Debug for XTreamAPI {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XTreamAPI")
+            .field("base_url", &self.base_url)
+            .field("username", &self.username)
+            .field("provider_name", &self.provider_name)
+            .field("provider_hash", &self.provider_hash)
+            .field("show_progress", &self.show_progress)
+            .field("logger", &self.logger.is_some())
+            .finish()
+    }
 }
 
 impl XTreamAPI {
@@ -473,7 +487,18 @@ impl XTreamAPI {
             cache_manager,
             favourites_manager,
             provider_hash,
+            logger: None,
+            show_progress: true,
         })
+    }
+
+    pub fn set_logger(&mut self, logger: Box<dyn Fn(String) + Send + Sync>) {
+        self.logger = Some(logger);
+        self.show_progress = false;
+    }
+
+    pub fn disable_progress(&mut self) {
+        self.show_progress = false;
     }
 
     async fn make_request<T>(&self, action: &str, category_id: Option<&str>) -> Result<T>
@@ -489,19 +514,34 @@ impl XTreamAPI {
             url.push_str(&format!("&category_id={}", cat_id));
         }
 
-        println!(
-            "Requesting: {} (action: {}, category: {:?})",
-            url, action, category_id
-        );
+        if let Some(ref logger) = self.logger {
+            logger(format!(
+                "Requesting: {} (action: {}, category: {:?})",
+                url, action, category_id
+            ));
+        } else if self.show_progress {
+            println!(
+                "Requesting: {} (action: {}, category: {:?})",
+                url, action, category_id
+            );
+        }
 
-        // Create progress bar with indefinite style showing bytes received
-        let pb = ProgressBar::new_spinner();
-        pb.set_style(
-            ProgressStyle::default_spinner()
-                .template("{spinner:.green} {msg} [{elapsed_precise}] {bytes}")
-                .unwrap_or_else(|_| ProgressStyle::default_spinner()),
-        );
-        pb.set_message("Sending request...");
+        // Create progress bar only if not in TUI mode
+        let pb = if self.show_progress && self.logger.is_none() {
+            let pb = ProgressBar::new_spinner();
+            pb.set_style(
+                ProgressStyle::default_spinner()
+                    .template("{spinner:.green} {msg} [{elapsed_precise}] {bytes}")
+                    .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+            );
+            pb.set_message("Sending request...");
+            Some(pb)
+        } else {
+            if let Some(ref logger) = self.logger {
+                logger("Sending request...".to_string());
+            }
+            None
+        };
 
         let response = self
             .client
@@ -511,14 +551,20 @@ impl XTreamAPI {
             .with_context(|| format!("Failed to send request to {}", url))?;
 
         if !response.status().is_success() {
-            pb.finish_and_clear();
+            if let Some(pb) = &pb {
+                pb.finish_and_clear();
+            }
             return Err(anyhow::anyhow!(
                 "HTTP request failed with status: {}",
                 response.status()
             ));
         }
 
-        pb.set_message("Downloading...");
+        if let Some(pb) = &pb {
+            pb.set_message("Downloading...");
+        } else if let Some(ref logger) = self.logger {
+            logger("Downloading...".to_string());
+        }
 
         // Stream the response and track bytes
         let mut response_bytes = Vec::new();
@@ -528,27 +574,40 @@ impl XTreamAPI {
             let chunk = chunk_result.with_context(|| "Failed to read response chunk")?;
 
             response_bytes.extend_from_slice(&chunk);
-            pb.set_position(response_bytes.len() as u64);
 
-            // Format bytes nicely
-            let bytes_str = if response_bytes.len() < 1024 {
-                format!("{} B", response_bytes.len())
-            } else if response_bytes.len() < 1024 * 1024 {
-                format!("{:.1} KB", response_bytes.len() as f64 / 1024.0)
-            } else {
-                format!("{:.1} MB", response_bytes.len() as f64 / (1024.0 * 1024.0))
-            };
+            if let Some(pb) = &pb {
+                pb.set_position(response_bytes.len() as u64);
 
-            let message = format!("Downloading... {}", bytes_str);
-            pb.set_message(message);
+                // Format bytes nicely
+                let bytes_str = if response_bytes.len() < 1024 {
+                    format!("{} B", response_bytes.len())
+                } else if response_bytes.len() < 1024 * 1024 {
+                    format!("{:.1} KB", response_bytes.len() as f64 / 1024.0)
+                } else {
+                    format!("{:.1} MB", response_bytes.len() as f64 / (1024.0 * 1024.0))
+                };
+
+                let message = format!("Downloading... {}", bytes_str);
+                pb.set_message(message);
+            }
         }
 
-        pb.set_message("Parsing JSON...");
+        if let Some(pb) = &pb {
+            pb.set_message("Parsing JSON...");
+        } else if let Some(ref logger) = self.logger {
+            logger("Parsing JSON...".to_string());
+        }
 
-        println!("Response size: {} bytes", response_bytes.len());
+        if let Some(ref logger) = self.logger {
+            logger(format!("Response size: {} bytes", response_bytes.len()));
+        } else if self.show_progress {
+            println!("Response size: {} bytes", response_bytes.len());
+        }
 
         if response_bytes.is_empty() {
-            pb.finish_and_clear();
+            if let Some(pb) = &pb {
+                pb.finish_and_clear();
+            }
             return Err(anyhow::anyhow!("Empty response from server"));
         }
 
@@ -556,7 +615,9 @@ impl XTreamAPI {
             .with_context(|| "Failed to convert response to UTF-8 string")?;
 
         if response_text.trim().is_empty() {
-            pb.finish_and_clear();
+            if let Some(pb) = &pb {
+                pb.finish_and_clear();
+            }
             return Err(anyhow::anyhow!("Empty response from server"));
         }
 
@@ -598,7 +659,9 @@ impl XTreamAPI {
             anyhow::anyhow!(error_msg)
         })?;
 
-        pb.finish_and_clear();
+        if let Some(pb) = pb {
+            pb.finish_and_clear();
+        }
         Ok(json)
     }
 
@@ -933,19 +996,13 @@ impl XTreamAPI {
         );
 
         debug!("Requesting series info for ID: {}", series_id);
-        let pb = ProgressBar::new_spinner();
-        pb.set_style(
-            ProgressStyle::with_template("{spinner:.green} {msg}")
-                .unwrap()
-                .tick_strings(&["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"]),
-        );
-        pb.set_message("Fetching series info...".to_string());
-        pb.enable_steady_tick(Duration::from_millis(120));
+
+        if let Some(ref logger) = self.logger {
+            logger(format!("Fetching series info for ID: {}", series_id));
+        }
 
         let response = self.client.get(&url).send().await?;
         let response_text = response.text().await?;
-
-        pb.finish_and_clear();
 
         if response_text.trim().is_empty() {
             return Err(anyhow::anyhow!("Empty response from server"));
@@ -1017,19 +1074,13 @@ impl XTreamAPI {
         );
 
         debug!("Requesting VOD info for ID: {}", vod_id);
-        let pb = ProgressBar::new_spinner();
-        pb.set_style(
-            ProgressStyle::with_template("{spinner:.green} {msg}")
-                .unwrap()
-                .tick_strings(&["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"]),
-        );
-        pb.set_message("Fetching movie info...".to_string());
-        pb.enable_steady_tick(Duration::from_millis(120));
+
+        if let Some(ref logger) = self.logger {
+            logger(format!("Fetching movie info for ID: {}", vod_id));
+        }
 
         let response = self.client.get(&url).send().await?;
         let response_text = response.text().await?;
-
-        pb.finish_and_clear();
 
         if response_text.trim().is_empty() {
             return Err(anyhow::anyhow!("Empty response from server"));

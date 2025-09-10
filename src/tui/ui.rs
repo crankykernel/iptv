@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 
@@ -81,20 +81,25 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_content(frame: &mut Frame, app: &mut App, area: Rect) {
-    // Split content area into main panel and side panel
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Min(50),    // Main content
-            Constraint::Length(40), // Side panel (logs/info)
-        ])
-        .split(area);
+    if app.show_logs {
+        // Split content area into main panel and side panel
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(50),    // Main content
+                Constraint::Length(40), // Side panel (logs/info)
+            ])
+            .split(area);
 
-    // Draw main content list
-    draw_main_list(frame, app, chunks[0]);
+        // Draw main content list
+        draw_main_list(frame, app, chunks[0]);
 
-    // Draw side panel with logs and info
-    draw_side_panel(frame, app, chunks[1]);
+        // Draw side panel with logs and info
+        draw_side_panel(frame, app, chunks[1]);
+    } else {
+        // Use full width for main content when logs are hidden
+        draw_main_list(frame, app, area);
+    }
 }
 
 fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -151,7 +156,7 @@ fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .map(|&item_idx| {
             let item = &app.items[item_idx];
             let content = if item_idx == app.selected_index {
-                Line::from(vec![Span::raw(" ▶ "), Span::raw(item)]).style(
+                Line::from(vec![Span::raw(" > "), Span::raw(item)]).style(
                     Style::default()
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD),
@@ -180,23 +185,8 @@ fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_side_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(10),   // Logs
-            Constraint::Length(5), // Progress (if any)
-        ])
-        .split(area);
-
-    // Draw logs panel
-    draw_logs_panel(frame, app, chunks[0]);
-
-    // Draw progress panel if there's progress to show
-    if let Some((progress, label)) = &app.progress {
-        draw_progress_panel(frame, chunks[1], *progress, label);
-    } else {
-        draw_info_panel(frame, app, chunks[1]);
-    }
+    // Just draw the logs panel using the full area
+    draw_logs_panel(frame, app, area);
 }
 
 fn draw_logs_panel(frame: &mut Frame, app: &App, area: Rect) {
@@ -226,56 +216,14 @@ fn draw_logs_panel(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(logs, inner_area);
 }
 
-fn draw_progress_panel(frame: &mut Frame, area: Rect, progress: f64, label: &str) {
-    let gauge = Gauge::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title(" Progress "),
-        )
-        .gauge_style(Style::default().fg(Color::Green))
-        .percent((progress * 100.0) as u16)
-        .label(label);
-
-    frame.render_widget(gauge, area);
-}
-
-fn draw_info_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let info_text = match &app.state {
-        AppState::StreamSelection(_, _) | AppState::FavouriteSelection => {
-            vec![
-                Line::from(""),
-                Line::from("Press 'f' to toggle favourite"),
-                Line::from("Press '?' for help"),
-            ]
-        }
-        _ => {
-            vec![
-                Line::from(""),
-                Line::from("Press '?' for help"),
-                Line::from("Press 'q' to quit"),
-            ]
-        }
-    };
-
-    let info = Paragraph::new(info_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title(" Info "),
-        )
-        .style(Style::default().fg(Color::Cyan));
-
-    frame.render_widget(info, area);
-}
-
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let footer_text = if let Some(msg) = &app.status_message {
         msg.clone()
     } else {
-        " ↑↓/jk: Navigate | PgUp/PgDn: Fast scroll | Enter: Select | Esc/b: Back | ?: Help | q: Quit ".to_string()
+        format!(
+            " ↑↓/jk: Navigate | Enter: Select | Esc/b: Back | Ctrl+.: {} Logs | ?: Help | q: Quit ",
+            if app.show_logs { "Hide" } else { "Show" }
+        )
     };
 
     let footer = Paragraph::new(footer_text)
