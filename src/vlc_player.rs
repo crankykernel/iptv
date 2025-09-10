@@ -237,9 +237,14 @@ impl VlcPlayer {
         Ok(())
     }
 
-    /// Stop VLC playback
+    /// Stop VLC playback and optionally kill the process
     pub async fn stop(&mut self) -> Result<()> {
-        debug!("Stopping VLC playback");
+        self.stop_with_kill(true).await
+    }
+    
+    /// Stop VLC playback with option to keep process running
+    pub async fn stop_with_kill(&mut self, kill_process: bool) -> Result<()> {
+        debug!("Stopping VLC playback (kill_process: {})", kill_process);
         
         // Try to stop via HTTP first
         if self.is_interface_ready().await {
@@ -254,14 +259,29 @@ impl VlcPlayer {
                 .basic_auth("", Some(&self.password))
                 .send()
                 .await;
+                
+            // Also clear the playlist to ensure nothing is playing
+            let clear_url = format!(
+                "http://127.0.0.1:{}/requests/status.xml?command=pl_empty",
+                self.port
+            );
+            
+            let _ = self
+                .http_client
+                .get(&clear_url)
+                .basic_auth("", Some(&self.password))
+                .send()
+                .await;
         }
 
-        // Kill the process if it exists
-        if let Some(mut child) = self.vlc_process.take() {
-            debug!("Killing VLC process");
-            let _ = child.kill();
-            let _ = child.wait();
-            info!("VLC process terminated");
+        // Kill the process if requested and it exists
+        if kill_process {
+            if let Some(mut child) = self.vlc_process.take() {
+                debug!("Killing VLC process");
+                let _ = child.kill();
+                let _ = child.wait();
+                info!("VLC process terminated");
+            }
         }
 
         Ok(())
@@ -317,9 +337,27 @@ impl VlcPlayer {
 impl Drop for VlcPlayer {
     fn drop(&mut self) {
         // Clean up VLC process on drop
+        // Note: In TUI mode, we intentionally don't kill VLC here to prevent
+        // Hyprland from switching workspaces. The process will be cleaned up
+        // when explicitly requested or on program exit.
         if let Some(mut child) = self.vlc_process.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+            // Check if the process is still running before attempting to kill
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    // Process already exited, nothing to do
+                }
+                Ok(None) => {
+                    // Process is still running
+                    // For now, we'll let it continue running to avoid workspace switches
+                    // The user can manually close VLC or it will be cleaned on next launch
+                    debug!("VLC process left running to prevent workspace switch");
+                }
+                Err(_) => {
+                    // Error checking status, attempt cleanup anyway
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
         }
     }
 }

@@ -228,10 +228,11 @@ impl Player {
     /// Stop TUI playback
     pub async fn stop_tui(&self) -> Result<()> {
         if self.is_vlc() {
-            // Stop VLC via HTTP interface
+            // Stop VLC playback but keep the window open
             let mut vlc_guard = self.vlc_player.lock().await;
-            if let Some(mut vlc) = vlc_guard.take() {
-                vlc.stop().await?;
+            if let Some(vlc) = vlc_guard.as_mut() {
+                // Stop playback but don't kill the process - keeps VLC window open
+                vlc.stop_with_kill(false).await?;
             }
         } else {
             // Stop regular process
