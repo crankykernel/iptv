@@ -725,8 +725,13 @@ impl App {
             self.filtered_indices.clone()
         };
 
+        if indices.is_empty() {
+            return;
+        }
+
         if let Some(current_pos) = indices.iter().position(|&idx| idx == self.selected_index) {
             if current_pos > 0 {
+                // Normal upward movement
                 self.selected_index = indices[current_pos - 1];
                 // Update scroll to follow selection
                 let visible_pos = indices[0..current_pos]
@@ -735,6 +740,16 @@ impl App {
                     .count();
                 if visible_pos == 0 {
                     self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                }
+            } else {
+                // Wrap to bottom: move to last item
+                self.selected_index = indices[indices.len() - 1];
+                // Update scroll to show the last item
+                let visible_height = 20;
+                if indices.len() > visible_height {
+                    self.scroll_offset = indices.len() - visible_height;
+                } else {
+                    self.scroll_offset = 0;
                 }
             }
         }
@@ -747,14 +762,24 @@ impl App {
             self.filtered_indices.clone()
         };
 
+        if indices.is_empty() {
+            return;
+        }
+
         if let Some(current_pos) = indices.iter().position(|&idx| idx == self.selected_index) {
             if current_pos < indices.len() - 1 {
+                // Normal downward movement
                 self.selected_index = indices[current_pos + 1];
                 // Update scroll to follow selection
                 let visible_height = 20;
                 if current_pos + 1 >= self.scroll_offset + visible_height {
                     self.scroll_offset = current_pos + 1 - visible_height + 1;
                 }
+            } else {
+                // Wrap to top: move to first item
+                self.selected_index = indices[0];
+                // Reset scroll to top
+                self.scroll_offset = 0;
             }
         }
     }
