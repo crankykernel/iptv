@@ -54,11 +54,8 @@ impl VlcPlayer {
             .arg("--http-password")
             .arg(&self.password)
             .arg("--no-video-title-show") // Don't show title on video
-            .arg("--start-time=0") // Always start from beginning
-            .arg("--no-playlist-autostart") // Don't auto-start playlist items
-            .arg("--no-media-library") // Disable media library (prevents resume)
-            .arg("--no-auto-preparse") // Don't preparse files
-            .arg("--no-resume-playback") // Don't resume playback
+            .arg("--qt-continue")
+            .arg("0") // Never ask to continue playback (0=Never, 1=Ask, 2=Always)
             .arg("--verbose")
             .arg("2"); // Set verbose level for debugging
         
