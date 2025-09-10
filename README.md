@@ -1,11 +1,8 @@
-<!--
-SPDX-License-Identifier: MIT
-SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
--->
-
 # IPTV Terminal Player
 
 A modern, terminal-based IPTV streaming client with Xtreme API support. Features both TUI (Terminal User Interface) and CLI modes for browsing and playing live TV, movies, and TV series.
+
+**Note**: This project is almost completely coded by an AI agent, guided by an experienced software developer.
 
 ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)
 ![Terminal](https://img.shields.io/badge/Terminal-%23054020?style=for-the-badge&logo=gnu-bash&logoColor=white)
@@ -40,53 +37,17 @@ A modern, terminal-based IPTV streaming client with Xtreme API support. Features
 
 ### Required Dependencies
 - **Rust**: Version 1.70 or later
-- **MPV Player**: For video playback (highly recommended)
+- **MPV Player**: Required for video playback
 
 ### System Requirements
-- Linux, macOS, or Windows with terminal support
+- Linux with terminal support
 - Internet connection for IPTV streaming
-
-### Installing MPV
-MPV is the recommended video player for the best experience:
-
-**Ubuntu/Debian:**
-```bash
-sudo apt update && sudo apt install mpv
-```
-
-**Fedora/RHEL:**
-```bash
-sudo dnf install mpv
-```
-
-**macOS (Homebrew):**
-```bash
-brew install mpv
-```
-
-**Arch Linux:**
-```bash
-sudo pacman -S mpv
-```
 
 ## Installation
 
-### From Source (Recommended)
+### Using Cargo Install
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd iptv
-
-# Build the application
-cargo build --release
-
-# The binary will be available at target/release/iptv
-```
-
-### Development Build
-```bash
-cargo build
-# Binary available at target/debug/iptv
+cargo install --git https://github.com/your-username/iptv
 ```
 
 ## Configuration
@@ -243,87 +204,9 @@ COMMANDS:
 - Each provider's content is cached separately
 - Provider selection menu when multiple providers are configured
 
-## Troubleshooting
-
-### MPV Not Found
-If you see "MPV not found" warnings:
-1. Install MPV using your system's package manager (see Prerequisites)
-2. Ensure MPV is in your system PATH
-3. The application will fall back to basic playback mode without MPV
-
-### Configuration Issues
-- Check configuration file location and format
-- Verify provider URLs and credentials
-- Test provider connectivity with verbose logging: `./iptv -v`
-
-### Playback Issues
-- Ensure stable internet connection
-- Check if streams work in MPV directly
-- Try different stream quality if available
-- Review debug logs: `./iptv --debug-log --tui`
-
-### Performance Issues
-- Clear cache files in `~/.cache/iptv/`
-- Reduce page size in configuration
-- Enable debug logging to identify bottlenecks
-
-## Development
-
-### Building from Source
-```bash
-# Debug build
-cargo build
-
-# Release build
-cargo build --release
-
-# Run tests
-cargo test
-
-# Run with logging
-RUST_LOG=debug cargo run -- --tui
-```
-
-### Project Structure
-```
-src/
-├── main.rs           # CLI argument parsing and main entry point
-├── lib.rs            # Library exports
-├── config.rs         # Configuration management
-├── xtream_api.rs     # Xtreme Codes API client
-├── player.rs         # Media player abstraction
-├── mpv_player.rs     # MPV player implementation
-├── cache.rs          # Caching system
-├── favourites.rs     # Favourites management
-├── cli/              # CLI menu system
-│   ├── mod.rs
-│   └── menu.rs
-└── tui/              # Terminal User Interface
-    ├── mod.rs
-    ├── app.rs        # Application state and logic
-    ├── ui.rs         # UI rendering
-    ├── event.rs      # Event handling
-    └── widgets.rs    # Custom UI widgets
-```
-
-### Contributing
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
 ## License
 
-This project is provided as-is. Please ensure you comply with all applicable laws and terms of service for your IPTV providers.
-
-## Support
-
-For issues, questions, or contributions:
-1. Check existing issues in the repository
-2. Create a new issue with detailed information
-3. Include debug logs when reporting problems
-4. Specify your operating system and terminal type
+MIT
 
 ---
 
