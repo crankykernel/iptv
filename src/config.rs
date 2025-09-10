@@ -10,8 +10,6 @@ use std::path::{Path, PathBuf};
 pub struct Config {
     pub providers: Vec<ProviderConfig>,
     #[serde(default)]
-    pub cache: CacheConfig,
-    #[serde(default)]
     pub ui: UiConfig,
 }
 
@@ -23,12 +21,6 @@ pub struct ProviderConfig {
     pub password: String,
 }
 
-impl Default for CacheConfig {
-    fn default() -> Self {
-        Self { max_entries: 1000 }
-    }
-}
-
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
@@ -37,11 +29,6 @@ impl Default for UiConfig {
             filter_english_only_series: false,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CacheConfig {
-    pub max_entries: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +48,6 @@ impl Default for Config {
                 username: "your-username".to_string(),
                 password: "your-password".to_string(),
             }],
-            cache: CacheConfig::default(),
             ui: UiConfig::default(),
         }
     }

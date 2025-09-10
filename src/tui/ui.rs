@@ -39,11 +39,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_help_overlay(frame, size);
     }
 
-    // Draw loading or error overlays
-    match &app.state {
-        AppState::Loading(msg) => draw_loading_overlay(frame, size, msg),
-        AppState::Error(msg) => draw_error_overlay(frame, size, msg),
-        _ => {}
+    // Draw error overlays (loading overlay removed)
+    if let AppState::Error(msg) = &app.state {
+        draw_error_overlay(frame, size, msg)
     }
 }
 
@@ -58,6 +56,13 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
         AppState::SeasonSelection(series) => &series.name,
         AppState::EpisodeSelection(series, season) => {
             &format!("{} - Season {}", series.name, season.season_number)
+        }
+        AppState::VodInfo(vod_state) => {
+            if vod_state.scroll_mode {
+                "VOD Info - Scroll Mode (Tab: Menu Mode)"
+            } else {
+                "VOD Info - Menu Mode (Tab: Scroll Mode)"
+            }
         }
         AppState::FavouriteSelection => "Favourites",
         AppState::Playing(name) => &format!("Playing: {}", name),
@@ -155,7 +160,25 @@ fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .iter()
         .map(|&item_idx| {
             let item = &app.items[item_idx];
-            let content = if item_idx == app.selected_index {
+
+            // Check if we're in VOD info mode and determine highlighting behavior
+            let should_highlight = match &app.state {
+                AppState::VodInfo(vod_state) => {
+                    if vod_state.scroll_mode {
+                        // In scroll mode, never highlight based on selection
+                        false
+                    } else {
+                        // In menu mode, only highlight if this is a menu item and it's selected
+                        item_idx == app.selected_index
+                            && (item.contains("Play Movie")
+                                || item.contains("Copy URL")
+                                || item.contains("Back"))
+                    }
+                }
+                _ => item_idx == app.selected_index,
+            };
+
+            let content = if should_highlight {
                 Line::from(vec![Span::raw(" > "), Span::raw(item)]).style(
                     Style::default()
                         .fg(Color::Yellow)
@@ -273,27 +296,6 @@ fn draw_help_overlay(frame: &mut Frame, area: Rect) {
     let help_area = centered_rect(60, 80, area);
     frame.render_widget(Clear, help_area);
     frame.render_widget(create_help_widget(), help_area);
-}
-
-fn draw_loading_overlay(frame: &mut Frame, area: Rect, message: &str) {
-    let loading_area = centered_rect(40, 20, area);
-    frame.render_widget(Clear, loading_area);
-
-    let loading = Paragraph::new(vec![
-        Line::from(""),
-        Line::from("⏳ Loading...").style(Style::default().fg(Color::Yellow)),
-        Line::from(""),
-        Line::from(message).style(Style::default().fg(Color::Gray)),
-    ])
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow))
-            .title(" Please Wait "),
-    )
-    .alignment(Alignment::Center);
-
-    frame.render_widget(loading, loading_area);
 }
 
 fn draw_error_overlay(frame: &mut Frame, area: Rect, message: &str) {

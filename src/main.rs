@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use inquire::{Password, Text};
 use std::fs::File;
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
@@ -41,6 +42,8 @@ struct Cli {
 enum Commands {
     /// Launch rofi menu with favourites
     Rofi,
+    /// Interactively add a new Xtreme API provider to the configuration
+    AddProvider,
 }
 
 async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result<()> {
@@ -223,6 +226,84 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
     Ok(())
 }
 
+async fn add_provider_interactively(config_path: PathBuf) -> Result<()> {
+    println!("Adding a new Xtreme API provider to your configuration");
+    println!("Please provide the following information:");
+    println!();
+
+    // Prompt for provider name
+    let name = Text::new("Provider name (user-friendly identifier):")
+        .with_help_message("This is just for your reference, e.g. 'My IPTV Service'")
+        .prompt()?;
+
+    // Validate name is not empty
+    if name.trim().is_empty() {
+        anyhow::bail!("Provider name cannot be empty");
+    }
+
+    // Prompt for URL
+    let url = Text::new("Xtreme API URL:")
+        .with_help_message("e.g. https://your-server.com:port/player_api.php")
+        .prompt()?;
+
+    // Validate URL is not empty and looks like a URL
+    if url.trim().is_empty() {
+        anyhow::bail!("URL cannot be empty");
+    }
+
+    // Basic URL validation
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        anyhow::bail!("URL must start with http:// or https://");
+    }
+
+    // Prompt for username
+    let username = Text::new("Username:").prompt()?;
+
+    // Validate username is not empty
+    if username.trim().is_empty() {
+        anyhow::bail!("Username cannot be empty");
+    }
+
+    // Prompt for password
+    let password = Password::new("Password:").without_confirmation().prompt()?;
+
+    // Validate password is not empty
+    if password.trim().is_empty() {
+        anyhow::bail!("Password cannot be empty");
+    }
+
+    // Create new provider config
+    let new_provider = ProviderConfig {
+        name: Some(name.trim().to_string()),
+        url: url.trim().to_string(),
+        username: username.trim().to_string(),
+        password: password.trim().to_string(),
+    };
+
+    // Load existing config or create new one
+    let mut config = if config_path.exists() {
+        Config::load(&config_path)?
+    } else {
+        // Ensure config directory exists
+        let _ = Config::ensure_config_dir();
+        Config::default()
+    };
+
+    // Add the new provider
+    config.providers.push(new_provider);
+
+    // Save the updated config
+    config.save(&config_path)?;
+
+    println!();
+    println!("✓ Provider '{}' added successfully!", name.trim());
+    println!("Configuration saved to: {}", config_path.display());
+    println!();
+    println!("You can now use this provider in the IPTV application.");
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -306,6 +387,9 @@ async fn main() -> Result<()> {
     match cli.command {
         Some(Commands::Rofi) => {
             run_rofi_menu(config.providers, player).await?;
+        }
+        Some(Commands::AddProvider) => {
+            add_provider_interactively(config_path).await?;
         }
         None => {
             // Check if TUI mode is requested

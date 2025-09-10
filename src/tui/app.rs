@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
+use crate::cli::menu::ContentType;
 use crate::config::ProviderConfig;
-use crate::menu::ContentType;
 use crate::player::Player;
 use crate::xtream_api::{
     ApiEpisode, Category, FavouriteStream, Stream, VodInfoResponse, XTreamAPI,
@@ -28,6 +28,7 @@ pub struct VodInfoState {
     pub saved_filtered_indices: Vec<usize>,
     pub saved_scroll: usize,
     pub saved_items: Vec<String>,
+    pub scroll_mode: bool, // true = scroll through content, false = navigate menu items
 }
 
 #[derive(Debug, Clone)]
@@ -236,8 +237,8 @@ impl App {
                 KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
                 KeyCode::PageUp => self.move_selection_page_up(),
                 KeyCode::PageDown => self.move_selection_page_down(),
-                KeyCode::Home => self.move_selection_home(),
-                KeyCode::End => self.move_selection_end(),
+                KeyCode::Home | KeyCode::Char('H') => self.move_selection_home(),
+                KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Enter => {
                     if self.selected_index == 0 {
                         // All Favourites selected
@@ -255,8 +256,8 @@ impl App {
                 KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
                 KeyCode::PageUp => self.move_selection_page_up(),
                 KeyCode::PageDown => self.move_selection_page_down(),
-                KeyCode::Home => self.move_selection_home(),
-                KeyCode::End => self.move_selection_end(),
+                KeyCode::Home | KeyCode::Char('H') => self.move_selection_home(),
+                KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Enter => {
                     self.handle_main_menu_selection().await;
                 }
@@ -277,8 +278,8 @@ impl App {
                 KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
                 KeyCode::PageUp => self.move_selection_page_up(),
                 KeyCode::PageDown => self.move_selection_page_down(),
-                KeyCode::Home => self.move_selection_home(),
-                KeyCode::End => self.move_selection_end(),
+                KeyCode::Home | KeyCode::Char('H') => self.move_selection_home(),
+                KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Char('r') => {
                     // Force refresh categories
                     let ct = content_type.clone();
@@ -304,8 +305,8 @@ impl App {
                 KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
                 KeyCode::PageUp => self.move_selection_page_up(),
                 KeyCode::PageDown => self.move_selection_page_down(),
-                KeyCode::Home => self.move_selection_home(),
-                KeyCode::End => self.move_selection_end(),
+                KeyCode::Home | KeyCode::Char('H') => self.move_selection_home(),
+                KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Char('r') => {
                     // Force refresh streams
                     let ct = content_type.clone();
@@ -360,78 +361,174 @@ impl App {
                 _ => {}
             },
             AppState::VodInfo(ref vod_state) => match key.code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    // Navigate through menu items
-                    let menu_items: Vec<usize> = self
-                        .items
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, item)| {
-                            item.contains("Play Movie")
-                                || item.contains("Copy URL")
-                                || item.contains("Back")
-                        })
-                        .map(|(i, _)| i)
-                        .collect();
+                KeyCode::Tab => {
+                    // Toggle between scroll mode and menu mode
+                    let scroll_mode = if let AppState::VodInfo(ref mut state) = &mut self.state {
+                        state.scroll_mode = !state.scroll_mode;
+                        let new_scroll_mode = state.scroll_mode;
 
-                    if let Some(current_pos) =
-                        menu_items.iter().position(|&i| i == self.selected_index)
-                    {
-                        if current_pos > 0 {
-                            self.selected_index = menu_items[current_pos - 1];
+                        if !state.scroll_mode {
+                            // Switching to menu mode - find first menu item
+                            let menu_items: Vec<usize> = self
+                                .items
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, item)| {
+                                    item.contains("Play Movie")
+                                        || item.contains("Copy URL")
+                                        || item.contains("Back")
+                                })
+                                .map(|(i, _)| i)
+                                .collect();
+
+                            if let Some(&first_menu_item) = menu_items.first() {
+                                self.selected_index = first_menu_item;
+                            }
+                        }
+
+                        new_scroll_mode
+                    } else {
+                        false
+                    };
+
+                    if let AppState::VodInfo(_) = &self.state {
+                        if !scroll_mode {
+                            self.ensure_selected_visible();
+                        }
+
+                        self.add_log(if scroll_mode {
+                            "Scroll mode: Use ↑↓ to scroll content, Tab for menu mode".to_string()
+                        } else {
+                            "Menu mode: Use ↑↓ to navigate menu, Tab for scroll mode".to_string()
+                        });
+                    }
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if vod_state.scroll_mode {
+                        // Scroll mode - move scroll offset up
+                        if self.scroll_offset > 0 {
+                            self.scroll_offset -= 1;
+                        }
+                    } else {
+                        // Menu mode - navigate through menu items
+                        let menu_items: Vec<usize> = self
+                            .items
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, item)| {
+                                item.contains("Play Movie")
+                                    || item.contains("Copy URL")
+                                    || item.contains("Back")
+                            })
+                            .map(|(i, _)| i)
+                            .collect();
+
+                        if let Some(current_pos) =
+                            menu_items.iter().position(|&i| i == self.selected_index)
+                        {
+                            if current_pos > 0 {
+                                self.selected_index = menu_items[current_pos - 1];
+                                self.ensure_selected_visible();
+                            }
                         }
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    // Navigate through menu items
-                    let menu_items: Vec<usize> = self
-                        .items
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, item)| {
-                            item.contains("Play Movie")
-                                || item.contains("Copy URL")
-                                || item.contains("Back")
-                        })
-                        .map(|(i, _)| i)
-                        .collect();
+                    if vod_state.scroll_mode {
+                        // Scroll mode - move scroll offset down
+                        let max_scroll = self.items.len().saturating_sub(1);
+                        if self.scroll_offset < max_scroll {
+                            self.scroll_offset += 1;
+                        }
+                    } else {
+                        // Menu mode - navigate through menu items
+                        let menu_items: Vec<usize> = self
+                            .items
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, item)| {
+                                item.contains("Play Movie")
+                                    || item.contains("Copy URL")
+                                    || item.contains("Back")
+                            })
+                            .map(|(i, _)| i)
+                            .collect();
 
-                    if let Some(current_pos) =
-                        menu_items.iter().position(|&i| i == self.selected_index)
-                    {
-                        if current_pos < menu_items.len() - 1 {
-                            self.selected_index = menu_items[current_pos + 1];
+                        if let Some(current_pos) =
+                            menu_items.iter().position(|&i| i == self.selected_index)
+                        {
+                            if current_pos < menu_items.len() - 1 {
+                                self.selected_index = menu_items[current_pos + 1];
+                                self.ensure_selected_visible();
+                            }
                         }
                     }
                 }
+                KeyCode::PageUp => {
+                    if vod_state.scroll_mode {
+                        // Scroll mode - page up
+                        let visible_height = self.page_size;
+                        self.scroll_offset = self.scroll_offset.saturating_sub(visible_height);
+                    }
+                }
+                KeyCode::PageDown => {
+                    if vod_state.scroll_mode {
+                        // Scroll mode - page down
+                        let visible_height = self.page_size;
+                        let max_scroll = self
+                            .items
+                            .len()
+                            .saturating_sub(visible_height.min(self.items.len()));
+                        self.scroll_offset = (self.scroll_offset + visible_height).min(max_scroll);
+                    }
+                }
+                KeyCode::Home | KeyCode::Char('H') => {
+                    if vod_state.scroll_mode {
+                        // Scroll mode - go to top
+                        self.scroll_offset = 0;
+                    }
+                }
+                KeyCode::End | KeyCode::Char('G') => {
+                    if vod_state.scroll_mode {
+                        // Scroll mode - go to bottom
+                        let visible_height = self.page_size;
+                        self.scroll_offset = self
+                            .items
+                            .len()
+                            .saturating_sub(visible_height.min(self.items.len()));
+                    }
+                }
                 KeyCode::Enter => {
-                    // Execute selected menu action
-                    let selected_item = &self.items[self.selected_index];
+                    // Execute selected menu action only in menu mode
+                    if !vod_state.scroll_mode {
+                        let selected_item = &self.items[self.selected_index];
 
-                    if selected_item.contains("Play Movie") {
-                        self.play_vod_stream(&vod_state.stream.clone()).await;
-                    } else if selected_item.contains("Copy URL") {
-                        if let Some(api) = &self.current_api {
-                            let extension = self
-                                .vod_info
-                                .as_ref()
-                                .map(|info| info.movie_data.container_extension.as_str());
-                            let url =
-                                api.get_stream_url(vod_state.stream.stream_id, "movie", extension);
-                            self.add_log(format!("Stream URL copied: {}", url));
-                            self.status_message = Some("URL copied to logs!".to_string());
-                        }
-                    } else if selected_item.contains("Back") {
-                        // Clone vod_state fields first to avoid borrow issues
-                        let saved_filter = vod_state.saved_filter.clone();
-                        let saved_selected = vod_state.saved_selected;
-                        let saved_filtered_indices = vod_state.saved_filtered_indices.clone();
-                        let saved_scroll = vod_state.saved_scroll;
-                        let saved_items = vod_state.saved_items.clone();
+                        if selected_item.contains("Play Movie") {
+                            self.play_vod_stream(&vod_state.stream.clone()).await;
+                        } else if selected_item.contains("Copy URL") {
+                            if let Some(api) = &self.current_api {
+                                let extension = self
+                                    .vod_info
+                                    .as_ref()
+                                    .map(|info| info.movie_data.container_extension.as_str());
+                                let url = api.get_stream_url(
+                                    vod_state.stream.stream_id,
+                                    "movie",
+                                    extension,
+                                );
+                                self.add_log(format!("Stream URL copied: {}", url));
+                                self.status_message = Some("URL copied to logs!".to_string());
+                            }
+                        } else if selected_item.contains("Back") {
+                            // Clone vod_state fields first to avoid borrow issues
+                            let saved_filter = vod_state.saved_filter.clone();
+                            let saved_selected = vod_state.saved_selected;
+                            let saved_filtered_indices = vod_state.saved_filtered_indices.clone();
+                            let saved_scroll = vod_state.saved_scroll;
+                            let saved_items = vod_state.saved_items.clone();
 
-                        // Go back to stream selection and restore previous state
-                        let category =
-                            if let Some(cat) = self.categories.iter().find(|c| {
+                            // Go back to stream selection and restore previous state
+                            let category = if let Some(cat) = self.categories.iter().find(|c| {
                                 vod_state.stream.category_id.as_ref() == Some(&c.category_id)
                             }) {
                                 cat.clone()
@@ -444,20 +541,21 @@ impl App {
                                 }
                             };
 
-                        // Restore the previous state
-                        self.state = AppState::StreamSelection(ContentType::Movies, category);
-                        self.items = saved_items;
-                        self.search_query = saved_filter;
-                        self.selected_index = saved_selected;
-                        self.filtered_indices = saved_filtered_indices;
-                        self.scroll_offset = saved_scroll;
+                            // Restore the previous state
+                            self.state = AppState::StreamSelection(ContentType::Movies, category);
+                            self.items = saved_items;
+                            self.search_query = saved_filter;
+                            self.selected_index = saved_selected;
+                            self.filtered_indices = saved_filtered_indices;
+                            self.scroll_offset = saved_scroll;
 
-                        // If there was a filter active, update the status message
-                        if !self.search_query.is_empty() {
-                            self.status_message = Some(format!(
-                                "Filtered: \"{}\" (Press '/' to search again)",
-                                self.search_query
-                            ));
+                            // If there was a filter active, update the status message
+                            if !self.search_query.is_empty() {
+                                self.status_message = Some(format!(
+                                    "Filtered: \"{}\" (Press '/' to search again)",
+                                    self.search_query
+                                ));
+                            }
                         }
                     }
                 }
@@ -507,8 +605,8 @@ impl App {
                 KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
                 KeyCode::PageUp => self.move_selection_page_up(),
                 KeyCode::PageDown => self.move_selection_page_down(),
-                KeyCode::Home => self.move_selection_home(),
-                KeyCode::End => self.move_selection_end(),
+                KeyCode::Home | KeyCode::Char('H') => self.move_selection_home(),
+                KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Enter => {
                     if self.selected_index < self.seasons.len() {
                         let season = &self.seasons[self.selected_index];
@@ -541,8 +639,8 @@ impl App {
                 KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
                 KeyCode::PageUp => self.move_selection_page_up(),
                 KeyCode::PageDown => self.move_selection_page_down(),
-                KeyCode::Home => self.move_selection_home(),
-                KeyCode::End => self.move_selection_end(),
+                KeyCode::Home | KeyCode::Char('H') => self.move_selection_home(),
+                KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Enter => {
                     if self.selected_index < self.episodes.len() {
                         let episode = self.episodes[self.selected_index].clone();
@@ -561,8 +659,8 @@ impl App {
                 KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
                 KeyCode::PageUp => self.move_selection_page_up(),
                 KeyCode::PageDown => self.move_selection_page_down(),
-                KeyCode::Home => self.move_selection_home(),
-                KeyCode::End => self.move_selection_end(),
+                KeyCode::Home | KeyCode::Char('H') => self.move_selection_home(),
+                KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Enter => {
                     if self.selected_index < self.cross_provider_favourites.len() {
                         let (favourite, provider) =
@@ -1634,6 +1732,7 @@ impl App {
                     saved_filtered_indices,
                     saved_scroll,
                     saved_items,
+                    scroll_mode: true, // Start in scroll mode by default
                 });
                 // Start with "Play Movie" selected
                 self.selected_index = self
@@ -1644,6 +1743,9 @@ impl App {
                 self.scroll_offset = 0;
 
                 self.add_log(format!("Ready to play: {}", vod_info.info.name));
+                self.add_log(
+                    "Scroll mode: Use ↑↓ to scroll content, Tab for menu mode".to_string(),
+                );
             }
             Err(e) => {
                 self.add_log(format!("Failed to load VOD info: {}", e));
@@ -1815,6 +1917,20 @@ impl App {
         // Keep only last 100 logs
         if self.logs.len() > 100 {
             self.logs.remove(0);
+        }
+    }
+
+    fn ensure_selected_visible(&mut self) {
+        // Make sure the selected item is visible on screen
+        let visible_height = self.page_size;
+
+        // If selected item is above visible area, scroll up
+        if self.selected_index < self.scroll_offset {
+            self.scroll_offset = self.selected_index;
+        }
+        // If selected item is below visible area, scroll down
+        else if self.selected_index >= self.scroll_offset + visible_height {
+            self.scroll_offset = self.selected_index.saturating_sub(visible_height - 1);
         }
     }
 
