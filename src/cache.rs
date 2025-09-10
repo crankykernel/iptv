@@ -198,12 +198,12 @@ impl CacheManager {
     {
         let cache_path = self.get_cache_path(provider_hash, cache_type, category_id);
 
-        if let Some(parent) = cache_path.parent() {
-            if !parent.exists() {
-                async_fs::create_dir_all(parent).await.with_context(|| {
-                    format!("Failed to create cache directory: {}", parent.display())
-                })?;
-            }
+        if let Some(parent) = cache_path.parent()
+            && !parent.exists()
+        {
+            async_fs::create_dir_all(parent).await.with_context(|| {
+                format!("Failed to create cache directory: {}", parent.display())
+            })?;
         }
 
         let cached_data = CachedData::new(data, metadata);

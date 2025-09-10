@@ -40,10 +40,10 @@ impl EventHandler {
                         _ => None,
                     };
 
-                    if let Some(event) = event {
-                        if sender_clone.send(event).is_err() {
-                            break;
-                        }
+                    if let Some(event) = event
+                        && sender_clone.send(event).is_err()
+                    {
+                        break;
                     }
                 } else {
                     // Small sleep to prevent CPU spinning when no events

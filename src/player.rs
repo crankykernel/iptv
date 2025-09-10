@@ -266,20 +266,20 @@ impl Player {
             if let Some(mpv) = mpv_guard.as_mut() {
                 let is_running = mpv.is_running().await;
 
-                if !is_running {
-                    if let Some(exit_status) = mpv.get_last_exit_status() {
-                        mpv.clear_last_exit_status();
+                if !is_running
+                    && let Some(exit_status) = mpv.get_last_exit_status()
+                {
+                    mpv.clear_last_exit_status();
 
-                        let message = if exit_status.success() {
-                            "MPV exited normally (status: 0)".to_string()
-                        } else if let Some(code) = exit_status.code() {
-                            format!("MPV exited with error code: {}", code)
-                        } else {
-                            "MPV terminated by signal".to_string()
-                        };
+                    let message = if exit_status.success() {
+                        "MPV exited normally (status: 0)".to_string()
+                    } else if let Some(code) = exit_status.code() {
+                        format!("MPV exited with error code: {}", code)
+                    } else {
+                        "MPV terminated by signal".to_string()
+                    };
 
-                        return (false, Some(message));
-                    }
+                    return (false, Some(message));
                 }
 
                 (is_running, None)

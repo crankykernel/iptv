@@ -349,10 +349,10 @@ async fn main() -> Result<()> {
         }
 
         // Check for ~/.config/iptv/config.toml
-        if let Some(config_path) = Config::default_config_path() {
-            if config_path.exists() {
-                return config_path;
-            }
+        if let Some(config_path) = Config::default_config_path()
+            && config_path.exists()
+        {
+            return config_path;
         }
 
         // Default to new location

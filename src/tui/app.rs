@@ -360,7 +360,7 @@ impl App {
                 }
                 _ => {}
             },
-            AppState::VodInfo(ref vod_state) => match key.code {
+            AppState::VodInfo(vod_state) => match key.code {
                 KeyCode::Up | KeyCode::Char('k') => {
                     // Always navigate through menu items
                     let menu_items: Vec<usize> = self
@@ -417,14 +417,14 @@ impl App {
                 }
                 KeyCode::PageUp => {
                     // Always scroll content up by page
-                    if let AppState::VodInfo(ref mut state) = &mut self.state {
+                    if let AppState::VodInfo(state) = &mut self.state {
                         let visible_height = self.page_size;
                         state.content_scroll = state.content_scroll.saturating_sub(visible_height);
                     }
                 }
                 KeyCode::PageDown => {
                     // Always scroll content down by page
-                    if let AppState::VodInfo(ref mut state) = &mut self.state {
+                    if let AppState::VodInfo(state) = &mut self.state {
                         let visible_height = self.page_size;
                         let max_scroll = self
                             .items
@@ -438,14 +438,14 @@ impl App {
                     // Space - scroll down by page (or up if Shift is held)
                     if key.modifiers.contains(KeyModifiers::SHIFT) {
                         // Shift+Space - scroll up by page
-                        if let AppState::VodInfo(ref mut state) = &mut self.state {
+                        if let AppState::VodInfo(state) = &mut self.state {
                             let visible_height = self.page_size;
                             state.content_scroll =
                                 state.content_scroll.saturating_sub(visible_height);
                         }
                     } else {
                         // Space - scroll down by page
-                        if let AppState::VodInfo(ref mut state) = &mut self.state {
+                        if let AppState::VodInfo(state) = &mut self.state {
                             let visible_height = self.page_size;
                             let max_scroll = self
                                 .items
@@ -458,13 +458,13 @@ impl App {
                 }
                 KeyCode::Home | KeyCode::Char('H') => {
                     // Always scroll content to top
-                    if let AppState::VodInfo(ref mut state) = &mut self.state {
+                    if let AppState::VodInfo(state) = &mut self.state {
                         state.content_scroll = 0;
                     }
                 }
                 KeyCode::End | KeyCode::Char('G') => {
                     // Always scroll content to bottom
-                    if let AppState::VodInfo(ref mut state) = &mut self.state {
+                    if let AppState::VodInfo(state) = &mut self.state {
                         let visible_height = self.page_size;
                         state.content_scroll = self
                             .items
@@ -996,22 +996,22 @@ impl App {
 
     async fn load_categories_internal(&mut self, content_type: ContentType, force_refresh: bool) {
         // Check cache first if not forcing refresh
-        if !force_refresh {
-            if let Some(cached) = self.cached_categories.get(&content_type) {
-                let ct = content_type.clone();
-                self.categories = cached.clone();
-                self.add_log(format!("Using cached {} categories", ct));
-                self.items = self
-                    .categories
-                    .iter()
-                    .map(|c| c.category_name.clone())
-                    .collect();
-                self.reset_filter();
-                self.state = AppState::CategorySelection(content_type.clone());
-                self.selected_index = 0;
-                self.scroll_offset = 0;
-                return;
-            }
+        if !force_refresh
+            && let Some(cached) = self.cached_categories.get(&content_type)
+        {
+            let ct = content_type.clone();
+            self.categories = cached.clone();
+            self.add_log(format!("Using cached {} categories", ct));
+            self.items = self
+                .categories
+                .iter()
+                .map(|c| c.category_name.clone())
+                .collect();
+            self.reset_filter();
+            self.state = AppState::CategorySelection(content_type.clone());
+            self.selected_index = 0;
+            self.scroll_offset = 0;
+            return;
         }
 
         self.state = AppState::Loading(format!("Loading {} categories...", content_type));
@@ -1071,41 +1071,41 @@ impl App {
     ) {
         // Check cache first if not forcing refresh
         let cache_key = (content_type.clone(), category.category_id.clone());
-        if !force_refresh {
-            if let Some(cached) = self.cached_streams.get(&cache_key) {
-                let cat_name = category.category_name.clone();
-                self.streams = cached.clone();
-                self.add_log(format!("Using cached streams for {}", cat_name));
+        if !force_refresh
+            && let Some(cached) = self.cached_streams.get(&cache_key)
+        {
+            let cat_name = category.category_name.clone();
+            self.streams = cached.clone();
+            self.add_log(format!("Using cached streams for {}", cat_name));
 
-                // Get list of favourites to mark them with a star
-                let favourites = if let Some(api) = &self.current_api {
-                    api.favourites_manager
-                        .get_favourites(&api.provider_hash)
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
+            // Get list of favourites to mark them with a star
+            let favourites = if let Some(api) = &self.current_api {
+                api.favourites_manager
+                    .get_favourites(&api.provider_hash)
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
 
-                // Create item list with stars for favourites
-                self.items = self
-                    .streams
-                    .iter()
-                    .map(|s| {
-                        let is_favourite = favourites.iter().any(|f| f.stream_id == s.stream_id);
-                        if is_favourite {
-                            format!("⭐ {}", s.name)
-                        } else {
-                            s.name.clone()
-                        }
-                    })
-                    .collect();
+            // Create item list with stars for favourites
+            self.items = self
+                .streams
+                .iter()
+                .map(|s| {
+                    let is_favourite = favourites.iter().any(|f| f.stream_id == s.stream_id);
+                    if is_favourite {
+                        format!("⭐ {}", s.name)
+                    } else {
+                        s.name.clone()
+                    }
+                })
+                .collect();
 
-                self.reset_filter();
-                self.state = AppState::StreamSelection(content_type, category);
-                self.selected_index = 0;
-                self.scroll_offset = 0;
-                return;
-            }
+            self.reset_filter();
+            self.state = AppState::StreamSelection(content_type, category);
+            self.selected_index = 0;
+            self.scroll_offset = 0;
+            return;
         }
 
         self.state = AppState::Loading(format!(
@@ -1398,10 +1398,10 @@ impl App {
                 self.add_log(format!("Removed {} from favourites", stream.name));
 
                 // Update the display to show the star is removed
-                if let Some(item) = self.items.get_mut(self.selected_index) {
-                    if item.starts_with("[FAV] ") {
-                        *item = item[6..].to_string(); // Remove the fav prefix
-                    }
+                if let Some(item) = self.items.get_mut(self.selected_index)
+                    && item.starts_with("[FAV] ")
+                {
+                    *item = item[6..].to_string(); // Remove the fav prefix
                 }
             } else {
                 // Add to favourites
@@ -1420,41 +1420,41 @@ impl App {
                 self.add_log(format!("Added {} to favourites", stream.name));
 
                 // Update the display to show the star
-                if let Some(item) = self.items.get_mut(self.selected_index) {
-                    if !item.starts_with("[FAV] ") {
-                        *item = format!("[FAV] {}", item);
-                    }
+                if let Some(item) = self.items.get_mut(self.selected_index)
+                    && !item.starts_with("[FAV] ")
+                {
+                    *item = format!("[FAV] {}", item);
                 }
             }
         }
     }
 
     async fn remove_favourite(&mut self, index: usize) {
-        if index < self.favourites.len() {
-            if let Some(api) = &self.current_api {
-                let fav = &self.favourites[index];
-                let _ = api.favourites_manager.remove_favourite(
-                    &api.provider_hash,
-                    fav.stream_id,
-                    &fav.stream_type,
-                );
-                self.add_log(format!("Removed {} from favourites", fav.name));
+        if index < self.favourites.len()
+            && let Some(api) = &self.current_api
+        {
+            let fav = &self.favourites[index];
+            let _ = api.favourites_manager.remove_favourite(
+                &api.provider_hash,
+                fav.stream_id,
+                &fav.stream_type,
+            );
+            self.add_log(format!("Removed {} from favourites", fav.name));
 
-                self.favourites.remove(index);
-                self.items.remove(index);
+            self.favourites.remove(index);
+            self.items.remove(index);
 
-                // Update filtered_indices after removing item
-                self.filtered_indices = (0..self.items.len()).collect();
+            // Update filtered_indices after removing item
+            self.filtered_indices = (0..self.items.len()).collect();
 
-                // Adjust selected index if needed
-                if self.selected_index >= self.items.len() && self.selected_index > 0 {
-                    self.selected_index -= 1;
-                }
+            // Adjust selected index if needed
+            if self.selected_index >= self.items.len() && self.selected_index > 0 {
+                self.selected_index -= 1;
+            }
 
-                // Ensure scroll offset is valid
-                if self.scroll_offset > 0 && self.scroll_offset >= self.items.len() {
-                    self.scroll_offset = self.items.len().saturating_sub(1);
-                }
+            // Ensure scroll offset is valid
+            if self.scroll_offset > 0 && self.scroll_offset >= self.items.len() {
+                self.scroll_offset = self.items.len().saturating_sub(1);
             }
         }
     }
@@ -1606,28 +1606,28 @@ impl App {
                     }
                 }
 
-                if let Some(ref genre) = vod_info.info.genre {
-                    if !genre.trim().is_empty() {
-                        items.push(format!("Genre: {}", genre));
-                    }
+                if let Some(ref genre) = vod_info.info.genre
+                    && !genre.trim().is_empty()
+                {
+                    items.push(format!("Genre: {}", genre));
                 }
 
-                if let Some(ref release_date) = vod_info.info.releasedate {
-                    if !release_date.trim().is_empty() {
-                        items.push(format!("Release: {}", release_date));
-                    }
+                if let Some(ref release_date) = vod_info.info.releasedate
+                    && !release_date.trim().is_empty()
+                {
+                    items.push(format!("Release: {}", release_date));
                 }
 
-                if let Some(ref rating) = vod_info.info.rating {
-                    if !rating.trim().is_empty() {
-                        items.push(format!("Rating: {}", rating));
-                    }
+                if let Some(ref rating) = vod_info.info.rating
+                    && !rating.trim().is_empty()
+                {
+                    items.push(format!("Rating: {}", rating));
                 }
 
-                if let Some(ref duration) = vod_info.info.duration {
-                    if !duration.trim().is_empty() {
-                        items.push(format!("Duration: {}", duration));
-                    }
+                if let Some(ref duration) = vod_info.info.duration
+                    && !duration.trim().is_empty()
+                {
+                    items.push(format!("Duration: {}", duration));
                 }
 
                 if let Some(ref cast) = vod_info.info.cast {

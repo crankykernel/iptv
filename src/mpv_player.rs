@@ -54,10 +54,10 @@ impl MpvPlayer {
         let parsed: Value = serde_json::from_str(&response)
             .with_context(|| format!("Failed to parse MPV response: {}", response))?;
 
-        if let Some(error) = parsed.get("error").and_then(|e| e.as_str()) {
-            if error != "success" {
-                return Err(anyhow::anyhow!("MPV command failed: {}", error));
-            }
+        if let Some(error) = parsed.get("error").and_then(|e| e.as_str())
+            && error != "success"
+        {
+            return Err(anyhow::anyhow!("MPV command failed: {}", error));
         }
 
         Ok(parsed)
@@ -76,12 +76,11 @@ impl MpvPlayer {
                     "command": ["get_property", "mpv-version"]
                 });
 
-                if let Ok(command_str) = serde_json::to_string(&command) {
-                    if socket.write_all(command_str.as_bytes()).is_ok()
-                        && socket.write_all(b"\n").is_ok()
-                    {
-                        return true;
-                    }
+                if let Ok(command_str) = serde_json::to_string(&command)
+                    && socket.write_all(command_str.as_bytes()).is_ok()
+                    && socket.write_all(b"\n").is_ok()
+                {
+                    return true;
                 }
                 false
             }

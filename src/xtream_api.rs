@@ -1148,7 +1148,9 @@ impl XTreamAPI {
         extension: Option<&str>,
     ) -> String {
         let ext = extension.unwrap_or("m3u8");
-        let url = match stream_type {
+
+        // URL logging moved to TUI logs panel
+        match stream_type {
             "live" => format!(
                 "{}/live/{}/{}/{}.{}",
                 self.base_url, self.username, self.password, stream_id, ext
@@ -1165,10 +1167,7 @@ impl XTreamAPI {
                 "{}/live/{}/{}/{}.{}",
                 self.base_url, self.username, self.password, stream_id, ext
             ),
-        };
-
-        // URL logging moved to TUI logs panel
-        url
+        }
     }
 
     pub async fn clear_cache(&mut self) -> Result<()> {
