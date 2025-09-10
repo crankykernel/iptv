@@ -13,10 +13,5 @@ url = "https://another-server.com:port/player_api.php"
 username = "your-username-2"
 password = "your-password-2"
 
-[cache]
-ttl_seconds = 3600
-max_entries = 1000
-
 [ui]
 page_size = 20
-search_debounce_ms = 300
