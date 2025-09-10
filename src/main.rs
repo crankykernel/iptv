@@ -220,6 +220,10 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
         // Use the async play method directly since we're already in async context
         player.play_detached(&stream_url).await?;
         tracing::info!("Player started in background");
+
+        // Small delay to ensure MPV is fully detached before we exit
+        // This helps when launched from desktop files
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     } else {
         tracing::error!("Selected favourite not found: {}", selected_display);
     }

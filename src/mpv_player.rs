@@ -206,18 +206,40 @@ impl MpvPlayer {
         }
 
         // Start MPV with IPC socket
-        let mut cmd = Command::new("mpv");
-        cmd.arg(format!("--input-ipc-server={}", self.socket_path.display()))
-            .arg("--idle=yes") // Keep MPV running even with no file
-            .arg("--force-window=yes") // Always show window
-            .arg("--keep-open=yes") // Don't close after playback
-            .arg("--no-terminal") // No terminal output in TUI mode
-            .arg("--really-quiet") // Suppress all console output
-            .arg("--osc=yes") // Enable on-screen controller
-            .arg("--osd-bar=yes") // Show OSD bar
-            .arg("--title=IPTV Player (MPV)")
-            .arg("--geometry=1280x720") // Default window size
-            .arg("--autofit-larger=90%x90%"); // Max window size
+        // Use setsid to detach from parent process group on Linux
+        // This prevents MPV from being killed when parent exits
+        let mut cmd = if cfg!(target_os = "linux") {
+            let mut setsid_cmd = Command::new("setsid");
+            setsid_cmd.arg("mpv");
+            setsid_cmd
+                .arg(format!("--input-ipc-server={}", self.socket_path.display()))
+                .arg("--idle=yes") // Keep MPV running even with no file
+                .arg("--force-window=yes") // Always show window
+                .arg("--keep-open=yes") // Don't close after playback
+                .arg("--no-terminal") // No terminal output in TUI mode
+                .arg("--really-quiet") // Suppress all console output
+                .arg("--osc=yes") // Enable on-screen controller
+                .arg("--osd-bar=yes") // Show OSD bar
+                .arg("--title=IPTV Player (MPV)")
+                .arg("--geometry=1280x720") // Default window size
+                .arg("--autofit-larger=90%x90%"); // Max window size
+            setsid_cmd
+        } else {
+            let mut mpv_cmd = Command::new("mpv");
+            mpv_cmd
+                .arg(format!("--input-ipc-server={}", self.socket_path.display()))
+                .arg("--idle=yes") // Keep MPV running even with no file
+                .arg("--force-window=yes") // Always show window
+                .arg("--keep-open=yes") // Don't close after playback
+                .arg("--no-terminal") // No terminal output in TUI mode
+                .arg("--really-quiet") // Suppress all console output
+                .arg("--osc=yes") // Enable on-screen controller
+                .arg("--osd-bar=yes") // Show OSD bar
+                .arg("--title=IPTV Player (MPV)")
+                .arg("--geometry=1280x720") // Default window size
+                .arg("--autofit-larger=90%x90%"); // Max window size
+            mpv_cmd
+        };
 
         // Pipe stdout/stderr to consume them
         cmd.stdout(Stdio::piped())
