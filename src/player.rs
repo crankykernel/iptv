@@ -73,6 +73,43 @@ impl Player {
         Ok(())
     }
 
+    /// Play video in completely disassociated window - no RPC, won't be killed/replaced
+    pub async fn play_disassociated(&self, url: &str) -> Result<()> {
+        if !self.use_mpv {
+            return Err(anyhow::anyhow!(
+                "MPV is not installed. Please install MPV to use this application."
+            ));
+        }
+
+        // Launch MPV directly without any IPC/RPC socket
+        // Use setsid to ensure it's fully detached
+        let mut cmd = if cfg!(target_os = "linux") {
+            let mut setsid_cmd = std::process::Command::new("setsid");
+            setsid_cmd.arg("mpv");
+            setsid_cmd.arg(url);
+            setsid_cmd
+        } else {
+            let mut mpv_cmd = std::process::Command::new("mpv");
+            mpv_cmd.arg(url);
+            mpv_cmd
+        };
+
+        // Add nice defaults for the disassociated window
+        cmd.arg("--force-window=yes")
+            .arg("--keep-open=yes")
+            .arg("--title=IPTV Stream (Independent)")
+            .arg("--geometry=1280x720")
+            .arg("--autofit-larger=90%x90%")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .stdin(std::process::Stdio::null());
+
+        cmd.spawn()
+            .context("Failed to start MPV in disassociated mode")?;
+
+        Ok(())
+    }
+
     /// Play video in detached mode for rofi - starts MPV with RPC then exits
     pub async fn play_detached(&self, url: &str) -> Result<()> {
         if !self.use_mpv {

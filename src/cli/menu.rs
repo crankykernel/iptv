@@ -456,7 +456,11 @@ impl MenuSystem {
                 let selected_favourite = &favourites[selected_index];
 
                 // Show action menu
-                let actions = vec!["▶ Play Stream", "🗑 Remove from Favourites"];
+                let actions = vec![
+                    "▶ Play Stream",
+                    "🔗 Play in New Window (Detached)",
+                    "🗑 Remove from Favourites",
+                ];
                 let action_selection = Select::new(
                     &format!("Action for '{}':", selected_favourite.name),
                     actions,
@@ -473,6 +477,19 @@ impl MenuSystem {
                         println!("Playing: {}", selected_favourite.name);
                         if let Err(e) = self.player.play(&url).await {
                             println!("Playback error: {}", e);
+                        }
+                    }
+                    Some("🔗 Play in New Window (Detached)") => {
+                        let url = api.get_stream_url(
+                            selected_favourite.stream_id,
+                            &selected_favourite.stream_type,
+                            None,
+                        );
+                        println!("Starting in new window: {}", selected_favourite.name);
+                        if let Err(e) = self.player.play_disassociated(&url).await {
+                            println!("Failed to start playback: {}", e);
+                        } else {
+                            println!("Stream started in a new independent window");
                         }
                     }
                     Some("🗑 Remove from Favourites") => {
@@ -777,7 +794,7 @@ impl MenuSystem {
                     )?;
 
                     // Show action menu
-                    let mut actions = vec!["▶ Play Stream"];
+                    let mut actions = vec!["▶ Play Stream", "🔗 Play in New Window (Detached)"];
                     if stream_type == "live" {
                         // Only allow favourites for live streams for now
                         if is_fav {
@@ -798,6 +815,16 @@ impl MenuSystem {
                             println!("Playing: {}", selected_stream.name);
                             if let Err(e) = self.player.play(&url).await {
                                 println!("Playback error: {}", e);
+                            }
+                        }
+                        Some("🔗 Play in New Window (Detached)") => {
+                            let url =
+                                api.get_stream_url(selected_stream.stream_id, stream_type, None);
+                            println!("Starting in new window: {}", selected_stream.name);
+                            if let Err(e) = self.player.play_disassociated(&url).await {
+                                println!("Failed to start playback: {}", e);
+                            } else {
+                                println!("Stream started in a new independent window");
                             }
                         }
                         Some("⭐ Add to Favourites") => {
@@ -1273,23 +1300,35 @@ impl MenuSystem {
         println!();
 
         // Show play confirmation
-        let actions = vec!["▶ Play Movie", "⬅ Back"];
+        let actions = vec!["▶ Play Movie", "🔗 Play in New Window (Detached)", "⬅ Back"];
         let action_selection =
             Select::new(&format!("Action for '{}':", vod_info.info.name), actions)
                 .prompt_skippable()?;
 
-        if let Some("▶ Play Movie") = action_selection {
-            // Use the container extension from VOD info
-            let url = stream_url.clone();
+        match action_selection {
+            Some("▶ Play Movie") => {
+                // Use the container extension from VOD info
+                let url = stream_url.clone();
 
-            println!(
-                "Playing: {} ({})",
-                vod_info.info.name, vod_info.movie_data.container_extension
-            );
-            self.player
-                .play(&url)
-                .await
-                .map_err(|e| anyhow::anyhow!("Playback error: {}", e))?;
+                println!(
+                    "Playing: {} ({})",
+                    vod_info.info.name, vod_info.movie_data.container_extension
+                );
+                self.player
+                    .play(&url)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Playback error: {}", e))?;
+            }
+            Some("🔗 Play in New Window (Detached)") => {
+                let url = stream_url.clone();
+                println!("Starting in new window: {}", vod_info.info.name);
+                if let Err(e) = self.player.play_disassociated(&url).await {
+                    println!("Failed to start playback: {}", e);
+                } else {
+                    println!("Movie started in a new independent window");
+                }
+            }
+            _ => {} // Back
         }
 
         Ok(())
