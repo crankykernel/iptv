@@ -8,7 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::thread;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 pub struct Player {
     mpv_player: Arc<Mutex<Option<MpvPlayer>>>,
@@ -31,10 +31,11 @@ impl Player {
         let use_mpv = Self::is_mpv_available();
 
         if use_mpv {
-            info!("MPV detected and will be used as the video player");
+            debug!("MPV detected and will be used as the video player");
         } else {
-            error!("MPV not found! Please install MPV for the best experience.");
-            warn!("Falling back to basic player mode without remote control support");
+            debug!(
+                "MPV not found! Falling back to basic player mode without remote control support"
+            );
         }
 
         Self {
@@ -58,79 +59,17 @@ impl Player {
         self.use_mpv
     }
 
-    pub fn play(&self, url: &str) -> Result<()> {
+    pub async fn play(&self, url: &str) -> Result<()> {
         if !self.use_mpv {
             return Err(anyhow::anyhow!(
                 "MPV is not installed. Please install MPV to use this application."
             ));
         }
 
-        // For CLI mode, use regular process spawning
-        let mut cmd = Command::new("mpv");
-
-        // Add the URL
-        cmd.arg(url);
-
-        println!("Starting MPV: {}", url);
-        println!("Press Ctrl+C or quit the player to return to the menu");
-
-        // Run the process in the foreground and wait for it to complete
-        let status = cmd
-            .status()
-            .context("Failed to execute MPV. Is MPV installed?")?;
-
-        if !status.success() {
-            eprintln!("MPV exited with error code: {}", status);
-            return Err(anyhow::anyhow!(
-                "MPV process failed with exit code: {}",
-                status
-            ));
-        }
-
-        println!("MPV exited successfully");
-        Ok(())
-    }
-
-    pub fn play_background(&self, url: &str) -> Result<()> {
-        if !self.use_mpv {
-            return Err(anyhow::anyhow!(
-                "MPV is not installed. Please install MPV to use this application."
-            ));
-        }
-
-        let mut cmd = Command::new("mpv");
-
-        // Add the URL
-        cmd.arg(url);
-
-        // Pipe stdout/stderr so we can consume them to prevent blocking
-        cmd.stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null());
-
-        // Start the process in background
-        let mut child = cmd.spawn().context("Failed to start MPV in background")?;
-
-        // Spawn threads to consume stdout and stderr
-        if let Some(stdout) = child.stdout.take() {
-            thread::spawn(move || {
-                let reader = BufReader::new(stdout);
-                for _ in reader.lines() {
-                    // Just consume the output, don't process it
-                }
-            });
-        }
-
-        if let Some(stderr) = child.stderr.take() {
-            thread::spawn(move || {
-                let reader = BufReader::new(stderr);
-                for _ in reader.lines() {
-                    // Just consume the output, don't process it
-                }
-            });
-        }
-
-        // Let the process run detached
+        // For CLI mode, use the same TUI method for consistent RPC behavior
+        self.play_tui(url).await?;
+        println!("▶️  Playing in background...");
+        println!("You can continue browsing or start another stream.");
         Ok(())
     }
 
@@ -147,7 +86,7 @@ impl Player {
                 let is_running = mpv.is_running().await;
                 debug!("MPV is_running check returned: {}", is_running);
                 if !is_running {
-                    info!("MPV is not responding, will restart");
+                    debug!("MPV is not responding, will restart");
                 }
                 !is_running
             } else {
@@ -156,7 +95,7 @@ impl Player {
             };
 
             if needs_restart {
-                info!("Starting new MPV instance");
+                debug!("Starting new MPV instance");
                 if let Some(mut old_mpv) = mpv_guard.take() {
                     debug!("Cleaning up old MPV instance");
                     let _ = old_mpv.stop().await;
@@ -266,9 +205,7 @@ impl Player {
             if let Some(mpv) = mpv_guard.as_mut() {
                 let is_running = mpv.is_running().await;
 
-                if !is_running
-                    && let Some(exit_status) = mpv.get_last_exit_status()
-                {
+                if !is_running && let Some(exit_status) = mpv.get_last_exit_status() {
                     mpv.clear_last_exit_status();
 
                     let message = if exit_status.success() {
@@ -346,19 +283,20 @@ impl Player {
 
     /// Shutdown the player and clean up all resources
     pub async fn shutdown(&self) -> Result<()> {
-        info!("Shutting down player");
+        debug!("Shutting down player");
 
         if self.use_mpv {
             let mut mpv_guard = self.mpv_player.lock().await;
             if let Some(mut mpv) = mpv_guard.take() {
                 let _ = mpv.shutdown().await;
             }
-        } else {
-            let mut process_guard = self.fallback_process.lock().await;
-            if let Some(mut child) = process_guard.take() {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
+        }
+
+        // Also cleanup any CLI background process
+        let mut process_guard = self.fallback_process.lock().await;
+        if let Some(mut child) = process_guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
         }
 
         Ok(())

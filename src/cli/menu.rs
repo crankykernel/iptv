@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
+use crate::FavouritesManager;
 use crate::config::ProviderConfig;
 use crate::player::Player;
 use crate::xtream_api::{Category, Episode, Season, XTreamAPI};
-use crate::FavouritesManager;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use inquire::Select;
 use std::collections::HashMap;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 enum ProviderSelection {
     Provider(ProviderConfig),
@@ -22,6 +22,22 @@ pub struct MenuSystem {
     current_api: Option<XTreamAPI>,
     player: Player,
     page_size: usize,
+}
+
+impl Drop for MenuSystem {
+    fn drop(&mut self) {
+        // Ensure player is stopped when the menu system is dropped
+        let player = self.player.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Handle::try_current()
+                .unwrap_or_else(|_| tokio::runtime::Runtime::new().unwrap().handle().clone());
+            rt.block_on(async move {
+                let _ = player.shutdown().await;
+            });
+        })
+        .join()
+        .ok();
+    }
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -227,7 +243,7 @@ impl MenuSystem {
     }
 
     async fn connect_to_provider(&mut self, provider: &ProviderConfig) -> Result<()> {
-        info!(
+        debug!(
             "Connecting to provider: {}",
             provider.name.as_ref().unwrap_or(&provider.url)
         );
@@ -252,7 +268,7 @@ impl MenuSystem {
                         format!("Expires: {}", user_info.exp_date)
                     };
 
-                    info!("Connected! {}", expires_msg);
+                    debug!("Connected! {}", expires_msg);
 
                     // Warm the cache on first connection
                     if let Err(e) = api.warm_cache().await {
@@ -364,7 +380,7 @@ impl MenuSystem {
                     &selected_favourite.stream_type,
                     None,
                 );
-                self.player.play(&stream_url)?;
+                self.player.play(&stream_url).await?;
             } else {
                 break;
             }
@@ -435,7 +451,7 @@ impl MenuSystem {
                             None,
                         );
                         println!("Playing: {}", selected_favourite.name);
-                        if let Err(e) = self.player.play(&url) {
+                        if let Err(e) = self.player.play(&url).await {
                             println!("Playback error: {}", e);
                         }
                     }
@@ -760,7 +776,7 @@ impl MenuSystem {
                             let url =
                                 api.get_stream_url(selected_stream.stream_id, stream_type, None);
                             println!("Playing: {}", selected_stream.name);
-                            if let Err(e) = self.player.play(&url) {
+                            if let Err(e) = self.player.play(&url).await {
                                 println!("Playback error: {}", e);
                             }
                         }
@@ -1137,7 +1153,7 @@ impl MenuSystem {
                 api.get_episode_stream_url(&episode.id, episode.container_extension.as_deref());
             println!("Playing: {} - Episode {}", series_name, episode.episode_num);
 
-            self.player.play(&stream_url)?;
+            self.player.play(&stream_url).await?;
         }
         // Back - do nothing
 
@@ -1178,6 +1194,7 @@ impl MenuSystem {
                 return self
                     .player
                     .play(&url)
+                    .await
                     .map_err(|e| anyhow::anyhow!("Playback error: {}", e));
             }
         };
@@ -1251,6 +1268,7 @@ impl MenuSystem {
             );
             self.player
                 .play(&url)
+                .await
                 .map_err(|e| anyhow::anyhow!("Playback error: {}", e))?;
         }
 

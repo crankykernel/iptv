@@ -8,8 +8,8 @@ use crate::xtream_api::{
     ApiEpisode, Category, FavouriteStream, Stream, VodInfoResponse, XTreamAPI,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -996,9 +996,7 @@ impl App {
 
     async fn load_categories_internal(&mut self, content_type: ContentType, force_refresh: bool) {
         // Check cache first if not forcing refresh
-        if !force_refresh
-            && let Some(cached) = self.cached_categories.get(&content_type)
-        {
+        if !force_refresh && let Some(cached) = self.cached_categories.get(&content_type) {
             let ct = content_type.clone();
             self.categories = cached.clone();
             self.add_log(format!("Using cached {} categories", ct));
@@ -1071,9 +1069,7 @@ impl App {
     ) {
         // Check cache first if not forcing refresh
         let cache_key = (content_type.clone(), category.category_id.clone());
-        if !force_refresh
-            && let Some(cached) = self.cached_streams.get(&cache_key)
-        {
+        if !force_refresh && let Some(cached) = self.cached_streams.get(&cache_key) {
             let cat_name = category.category_name.clone();
             self.streams = cached.clone();
             self.add_log(format!("Using cached streams for {}", cat_name));
