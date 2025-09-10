@@ -48,7 +48,7 @@ enum Commands {
 
 async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result<()> {
     if providers.is_empty() {
-        eprintln!("No providers configured. Please check your config file.");
+        tracing::error!("No providers configured. Please check your config file.");
         return Ok(());
     }
 
@@ -61,7 +61,7 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
         .map(|status| status.success())
         .unwrap_or(false)
     {
-        eprintln!("Error: 'rofi' command not found or not working. Please install rofi.");
+        tracing::error!("'rofi' command not found or not working. Please install rofi.");
         return Ok(());
     }
 
@@ -75,10 +75,10 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
 
     let mut all_favourites = Vec::new();
 
-    println!("Loading favourites from {} provider(s)...", providers.len());
+    tracing::info!("Loading favourites from {} provider(s)...", providers.len());
 
     for provider in &providers {
-        println!(
+        tracing::info!(
             "Connecting to provider: {}",
             provider.name.as_ref().unwrap_or(&provider.url)
         );
@@ -94,7 +94,7 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
         let provider_favourites = match api.favourites_manager.get_favourites(&api.provider_hash) {
             Ok(favs) => {
                 if !favs.is_empty() {
-                    println!(
+                    tracing::info!(
                         "Loaded {} favourites from {}",
                         favs.len(),
                         provider.name.as_ref().unwrap_or(&provider.url)
@@ -103,7 +103,7 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
                 favs
             }
             Err(e) => {
-                println!(
+                tracing::warn!(
                     "Error loading favourites from {}: {}",
                     provider.name.as_ref().unwrap_or(&provider.url),
                     e
@@ -125,7 +125,7 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
     let favourites = all_favourites;
 
     if favourites.is_empty() {
-        println!("No favourites found. Use the interactive menu to add favourites first.");
+        tracing::info!("No favourites found. Use the interactive menu to add favourites first.");
         return Ok(());
     }
 
@@ -174,9 +174,9 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
         // Check if there's stderr output to help debug
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !stderr.is_empty() {
-            eprintln!("rofi error: {}", stderr.trim());
+            tracing::error!("rofi error: {}", stderr.trim());
         } else {
-            println!("User cancelled selection or rofi exited");
+            tracing::info!("User cancelled selection or rofi exited");
         }
         return Ok(());
     }
@@ -214,14 +214,14 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
             &selected_item.favourite.stream_type,
             None,
         );
-        println!("Starting: {}", selected_item.favourite.name);
+        tracing::info!("Starting: {}", selected_item.favourite.name);
 
         // Start mpv in background and exit immediately
         // Use the async play method directly since we're already in async context
         player.play_detached(&stream_url).await?;
-        println!("Player started in background");
+        tracing::info!("Player started in background");
     } else {
-        eprintln!("Selected favourite not found: {}", selected_display);
+        tracing::error!("Selected favourite not found: {}", selected_display);
     }
 
     Ok(())
