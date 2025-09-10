@@ -57,13 +57,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
         AppState::EpisodeSelection(series, season) => {
             &format!("{} - Season {}", series.name, season.season_number)
         }
-        AppState::VodInfo(vod_state) => {
-            if vod_state.scroll_mode {
-                "VOD Info - Scroll Mode (Tab: Menu Mode)"
-            } else {
-                "VOD Info - Menu Mode (Tab: Scroll Mode)"
-            }
-        }
+        AppState::VodInfo(_) => "VOD Info",
         AppState::FavouriteSelection => "Favourites",
         AppState::Playing(name) => &format!("Playing: {}", name),
         _ => "IPTV Player",
@@ -145,9 +139,14 @@ fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Calculate visible range based on filtered items
     let visible_height = inner_area.height as usize;
-    let start = app
-        .scroll_offset
-        .min(display_indices.len().saturating_sub(1));
+
+    // Use content_scroll for VOD info, scroll_offset for others
+    let scroll_offset = match &app.state {
+        AppState::VodInfo(vod_state) => vod_state.content_scroll,
+        _ => app.scroll_offset,
+    };
+
+    let start = scroll_offset.min(display_indices.len().saturating_sub(1));
     let end = (start + visible_height).min(display_indices.len());
 
     // Safety check to prevent panic
@@ -163,17 +162,12 @@ fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
 
             // Check if we're in VOD info mode and determine highlighting behavior
             let should_highlight = match &app.state {
-                AppState::VodInfo(vod_state) => {
-                    if vod_state.scroll_mode {
-                        // In scroll mode, never highlight based on selection
-                        false
-                    } else {
-                        // In menu mode, only highlight if this is a menu item and it's selected
-                        item_idx == app.selected_index
-                            && (item.contains("Play Movie")
-                                || item.contains("Copy URL")
-                                || item.contains("Back"))
-                    }
+                AppState::VodInfo(_) => {
+                    // In VOD info mode, only highlight if this is a menu item and it's selected
+                    item_idx == app.selected_index
+                        && (item.contains("Play Movie")
+                            || item.contains("Copy URL")
+                            || item.contains("Back"))
                 }
                 _ => item_idx == app.selected_index,
             };
@@ -200,7 +194,7 @@ fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
         draw_scrollbar(
             frame,
             inner_area,
-            app.scroll_offset,
+            scroll_offset,
             display_indices.len(),
             visible_height,
         );
@@ -243,10 +237,20 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let footer_text = if let Some(msg) = &app.status_message {
         msg.clone()
     } else {
-        format!(
-            " ↑↓/jk: Navigate | Enter: Select | Esc/b: Back | Ctrl+.: {} Logs | ?: Help | q: Quit ",
-            if app.show_logs { "Hide" } else { "Show" }
-        )
+        match &app.state {
+            AppState::VodInfo(_) => {
+                format!(
+                    " ↑↓: Menu | PgUp/PgDn/Space/Shift+Space: Scroll | Enter: Select | Esc/b: Back | Ctrl+.: {} Logs | ?: Help ",
+                    if app.show_logs { "Hide" } else { "Show" }
+                )
+            }
+            _ => {
+                format!(
+                    " ↑↓/jk: Navigate | Enter: Select | Esc/b: Back | Ctrl+.: {} Logs | ?: Help | q: Quit ",
+                    if app.show_logs { "Hide" } else { "Show" }
+                )
+            }
+        }
     };
 
     let footer = Paragraph::new(footer_text)

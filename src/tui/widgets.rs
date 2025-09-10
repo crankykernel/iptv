@@ -60,11 +60,22 @@ pub fn create_help_widget() -> Paragraph<'static> {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )]),
-        Line::from("  /       - Fuzzy search/filter list"),
-        Line::from("  f       - Toggle favourite (in stream/favourite lists)"),
-        Line::from("  s       - Stop any active playback"),
-        Line::from("  ?/F1    - Toggle this help"),
-        Line::from("  Ctrl+C  - Force quit"),
+        Line::from("  /         - Fuzzy search/filter list"),
+        Line::from("  f         - Toggle favourite (in stream/favourite lists)"),
+        Line::from("  s         - Stop any active playback"),
+        Line::from("  ?/F1      - Toggle this help"),
+        Line::from("  Ctrl+C    - Force quit"),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "VOD Info Mode:",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from("  ↑/↓         - Navigate menu options"),
+        Line::from("  PgUp/PgDn   - Scroll content by page"),
+        Line::from("  Space       - Scroll content down by page"),
+        Line::from("  Shift+Space - Scroll content up by page"),
         Line::from(""),
         Line::from(vec![Span::styled(
             "Features:",
