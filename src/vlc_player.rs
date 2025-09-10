@@ -3,6 +3,7 @@
 
 use anyhow::{Context, Result};
 use reqwest::Client;
+use std::fs::OpenOptions;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use tokio::time::sleep;
@@ -53,10 +54,55 @@ impl VlcPlayer {
             .arg("--http-password")
             .arg(&self.password)
             .arg("--no-video-title-show") // Don't show title on video
-            .arg("--quiet") // Reduce console output
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .stdin(Stdio::null());
+            .arg("--verbose")
+            .arg("2"); // Set verbose level for debugging
+        
+        // If debug logging is enabled, redirect VLC output to log files
+        if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
+            // Try to open log files for VLC output
+            match OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("vlc_stdout.log")
+            {
+                Ok(mut stdout_file) => {
+                    // Write timestamp marker
+                    use std::io::Write;
+                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+                    let _ = writeln!(stdout_file, "\n=== VLC Started at {} ===", timestamp);
+                    cmd.stdout(stdout_file);
+                    debug!("VLC stdout will be logged to vlc_stdout.log");
+                }
+                Err(e) => {
+                    warn!("Failed to open vlc_stdout.log: {}", e);
+                    cmd.stdout(Stdio::null());
+                }
+            }
+            
+            match OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("vlc_stderr.log")
+            {
+                Ok(mut stderr_file) => {
+                    // Write timestamp marker
+                    use std::io::Write;
+                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+                    let _ = writeln!(stderr_file, "\n=== VLC Started at {} ===", timestamp);
+                    cmd.stderr(stderr_file);
+                    debug!("VLC stderr will be logged to vlc_stderr.log");
+                }
+                Err(e) => {
+                    warn!("Failed to open vlc_stderr.log: {}", e);
+                    cmd.stderr(Stdio::null());
+                }
+            }
+        } else {
+            cmd.stdout(Stdio::null())
+                .stderr(Stdio::null());
+        }
+        
+        cmd.stdin(Stdio::null());
 
         debug!("Executing VLC command: {:?}", cmd);
         
@@ -223,7 +269,11 @@ impl VlcPlayer {
     pub async fn is_running(&mut self) -> bool {
         // Simply check if the HTTP interface is responding
         // The process field might be None but VLC could still be running
-        self.is_interface_ready().await
+        let is_ready = self.is_interface_ready().await;
+        if !is_ready {
+            debug!("VLC is_running returning false - HTTP interface not ready");
+        }
+        is_ready
     }
 
     /// Pause playback

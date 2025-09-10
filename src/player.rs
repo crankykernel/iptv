@@ -121,6 +121,9 @@ impl Player {
                 // Check if the HTTP interface is still responding
                 let is_running = vlc.is_running().await;
                 debug!("VLC is_running check returned: {}", is_running);
+                if !is_running {
+                    info!("VLC is not responding, will restart");
+                }
                 !is_running
             } else {
                 debug!("No VLC instance found in guard");
