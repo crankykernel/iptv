@@ -36,7 +36,7 @@ A modern, terminal-based IPTV streaming client with Xtreme API support. Features
 ## Prerequisites
 
 ### Required Dependencies
-- **Rust**: Version 1.70 or later
+- **Rust**: Version 1.88.0 or later (MSRV)
 - **MPV Player**: Required for video playback
 
 ### System Requirements
