@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -17,6 +18,7 @@ pub struct MpvPlayer {
     socket_path: PathBuf,
     mpv_process: Option<Child>,
     last_exit_status: Option<std::process::ExitStatus>,
+    is_shared_instance: bool,
 }
 
 impl Default for MpvPlayer {
@@ -27,11 +29,106 @@ impl Default for MpvPlayer {
 
 impl MpvPlayer {
     pub fn new() -> Self {
-        let socket_path = std::env::temp_dir().join(format!("mpv-socket-{}", std::process::id()));
+        // Use a predictable socket path that's user-specific
+        // This allows multiple instances of the app to find the same MPV instance
+        let socket_path = Self::get_socket_path(false);
         Self {
             socket_path,
             mpv_process: None,
             last_exit_status: None,
+            is_shared_instance: true,
+        }
+    }
+
+    /// Create an MPV player with an isolated socket (not shared between instances)
+    pub fn new_isolated() -> Self {
+        let socket_path = Self::get_socket_path(true);
+        Self {
+            socket_path,
+            mpv_process: None,
+            last_exit_status: None,
+            is_shared_instance: false,
+        }
+    }
+
+    /// Get the socket path for MPV IPC
+    ///
+    /// Creates a secure socket path that is:
+    /// - User-specific (already ensured by ~/.local/state)
+    /// - App-specific (using fixed app name)
+    /// - Optionally instance-specific (using PID)
+    fn get_socket_path(isolated: bool) -> PathBuf {
+        // Use XDG_STATE_HOME for runtime state, falling back to ~/.local/state
+        let state_dir = std::env::var("XDG_STATE_HOME")
+            .ok()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                // Default to ~/.local/state as per XDG spec
+                let home = std::env::var("HOME").expect("HOME environment variable not set");
+                PathBuf::from(home).join(".local").join("state")
+            });
+
+        // Create iptv subdirectory
+        let iptv_dir = state_dir.join("iptv");
+
+        // Ensure directory exists with secure permissions
+        if !iptv_dir.exists() {
+            if let Err(e) = fs::create_dir_all(&iptv_dir) {
+                warn!("Failed to create state directory: {}", e);
+                // Fallback to temp directory
+                let uid = unsafe { libc::getuid() };
+                return std::env::temp_dir().join(format!(
+                    "iptv-mpv-{}.sock",
+                    if isolated {
+                        format!("{}-{}", uid, std::process::id())
+                    } else {
+                        uid.to_string()
+                    }
+                ));
+            }
+            // Set permissions to 0700 (owner only)
+            if let Err(e) = fs::set_permissions(&iptv_dir, fs::Permissions::from_mode(0o700)) {
+                warn!("Failed to set permissions on state directory: {}", e);
+            }
+        }
+
+        // Create socket name
+        let socket_name = if isolated {
+            // Instance-specific socket for isolated mode
+            format!("mpv-{}.sock", std::process::id())
+        } else {
+            // Shared socket name for all instances
+            "mpv.sock".to_string()
+        };
+
+        iptv_dir.join(socket_name)
+    }
+
+    /// Try to connect to an existing MPV instance
+    pub async fn try_connect_existing() -> Option<Self> {
+        let socket_path = Self::get_socket_path(false);
+
+        if !socket_path.exists() {
+            debug!("No existing MPV socket found at {:?}", socket_path);
+            return None;
+        }
+
+        let player = Self {
+            socket_path: socket_path.clone(),
+            mpv_process: None,
+            last_exit_status: None,
+            is_shared_instance: true,
+        };
+
+        // Check if the socket is actually responding
+        if player.is_socket_ready().await {
+            debug!("Connected to existing MPV instance at {:?}", socket_path);
+            Some(player)
+        } else {
+            debug!("Socket exists but MPV is not responding, cleaning up");
+            // Clean up stale socket
+            let _ = fs::remove_file(&socket_path);
+            None
         }
     }
 
@@ -266,8 +363,8 @@ impl MpvPlayer {
                 debug!("MPV process terminated");
             }
 
-            // Clean up socket file
-            if self.socket_path.exists() {
+            // Clean up socket file only if we own the process
+            if self.socket_path.exists() && !self.is_shared_instance {
                 let _ = fs::remove_file(&self.socket_path);
             }
         }
@@ -299,8 +396,8 @@ impl MpvPlayer {
                     self.last_exit_status = Some(status);
                     self.mpv_process = None;
 
-                    // Clean up socket file
-                    if self.socket_path.exists() {
+                    // Clean up socket file only if we own the process
+                    if self.socket_path.exists() && !self.is_shared_instance {
                         let _ = fs::remove_file(&self.socket_path);
                     }
 
@@ -402,8 +499,9 @@ impl Drop for MpvPlayer {
             }
         }
 
-        // Clean up socket file
-        if self.socket_path.exists() {
+        // Clean up socket file only if we own the process
+        // Don't delete shared sockets that other instances might be using
+        if self.socket_path.exists() && !self.is_shared_instance {
             let _ = fs::remove_file(&self.socket_path);
         }
     }

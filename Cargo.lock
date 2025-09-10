@@ -1088,6 +1088,7 @@ dependencies = [
  "fuzzy-matcher",
  "indicatif",
  "inquire",
+ "libc",
  "rand",
  "ratatui",
  "reqwest",

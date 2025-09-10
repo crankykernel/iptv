@@ -81,10 +81,19 @@ impl Player {
             ));
         }
 
-        // Start MPV with RPC support
+        // First try to connect to an existing MPV instance
+        if let Some(existing_mpv) = MpvPlayer::try_connect_existing().await {
+            debug!("Found existing MPV instance, reusing it");
+            existing_mpv.play(url).await?;
+            // Don't detach or stop - just let it continue playing
+            return Ok(());
+        }
+
+        // No existing instance, start a new one
+        debug!("No existing MPV instance found, starting new one");
         let mut mpv_guard = self.mpv_player.lock().await;
 
-        // Always start a fresh MPV instance for detached mode
+        // Clean up any old instance
         if let Some(mut old_mpv) = mpv_guard.take() {
             let _ = old_mpv.stop().await;
         }
@@ -130,10 +139,17 @@ impl Player {
                     let _ = old_mpv.stop().await;
                 }
 
-                let mut mpv = MpvPlayer::new();
-                mpv.launch().await?;
-                mpv.play(url).await?;
-                *mpv_guard = Some(mpv);
+                // First try to connect to an existing MPV instance
+                if let Some(existing_mpv) = MpvPlayer::try_connect_existing().await {
+                    debug!("Found existing MPV instance, reusing it");
+                    existing_mpv.play(url).await?;
+                    *mpv_guard = Some(existing_mpv);
+                } else {
+                    let mut mpv = MpvPlayer::new();
+                    mpv.launch().await?;
+                    mpv.play(url).await?;
+                    *mpv_guard = Some(mpv);
+                }
             } else if let Some(mpv) = mpv_guard.as_ref() {
                 match mpv.play(url).await {
                     Ok(_) => {}
