@@ -33,6 +33,8 @@ impl VlcPlayer {
         let mut cmd = Command::new("vlc");
         cmd.arg("--intf")
             .arg("http")
+            .arg("--extraintf")
+            .arg("qt") // Also show the Qt GUI interface
             .arg("--http-host")
             .arg("127.0.0.1")
             .arg("--http-port")
@@ -42,6 +44,7 @@ impl VlcPlayer {
             .arg("--no-video-title-show") // Don't show title on video
             .arg("--no-qt-error-dialogs") // Suppress error dialogs
             .arg("--quiet") // Reduce console output
+            .arg("--one-instance") // Reuse existing VLC instance if possible
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .stdin(Stdio::null());
@@ -83,7 +86,19 @@ impl VlcPlayer {
 
     /// Play or replace current video with new URL
     pub async fn play(&self, video_url: &str) -> Result<()> {
-        // First, clear the playlist
+        // Stop current playback first
+        let stop_url = format!(
+            "http://127.0.0.1:{}/requests/status.xml?command=pl_stop",
+            self.port
+        );
+        
+        let _ = self.http_client
+            .get(&stop_url)
+            .basic_auth("", Some(&self.password))
+            .send()
+            .await;
+
+        // Clear the playlist
         let clear_url = format!(
             "http://127.0.0.1:{}/requests/status.xml?command=pl_empty",
             self.port
