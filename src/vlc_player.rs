@@ -58,7 +58,6 @@ impl VlcPlayer {
             .arg("--no-playlist-autostart") // Don't auto-start playlist items
             .arg("--no-media-library") // Disable media library (prevents resume)
             .arg("--no-auto-preparse") // Don't preparse files
-            .arg("--no-restore-playback-pos") // Don't restore playback position
             .arg("--no-resume-playback") // Don't resume playback
             .arg("--verbose")
             .arg("2"); // Set verbose level for debugging
