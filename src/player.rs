@@ -160,11 +160,8 @@ impl Player {
                     let _ = old_vlc.stop().await;
                 }
 
-                // Create and launch new instance
-                let mut vlc = VlcPlayer::new(
-                    self.config.vlc.http_port,
-                    self.config.vlc.http_password.clone(),
-                );
+                // Create and launch new instance with random port/password
+                let mut vlc = VlcPlayer::new_random();
                 vlc.launch().await?;
                 vlc.play(url).await?;
                 *vlc_guard = Some(vlc);
@@ -180,10 +177,7 @@ impl Player {
                             drop(vlc_guard);
                             let mut vlc_guard = self.vlc_player.lock().await;
 
-                            let mut vlc = VlcPlayer::new(
-                                self.config.vlc.http_port,
-                                self.config.vlc.http_password.clone(),
-                            );
+                            let mut vlc = VlcPlayer::new_random();
                             vlc.launch().await?;
                             vlc.play(url).await?;
                             *vlc_guard = Some(vlc);
@@ -289,6 +283,72 @@ impl Player {
     }
 
     /// Check if player is currently running in TUI mode
+    /// Returns (is_running, exit_message)
+    pub async fn check_player_status(&self) -> (bool, Option<String>) {
+        if self.is_vlc() {
+            // Check VLC status
+            let mut vlc_guard = self.vlc_player.lock().await;
+            if let Some(vlc) = vlc_guard.as_mut() {
+                let is_running = vlc.is_running().await;
+
+                // Check if VLC has exited and report the status
+                if !is_running {
+                    if let Some(exit_status) = vlc.get_last_exit_status() {
+                        vlc.clear_last_exit_status();
+
+                        let message = if exit_status.success() {
+                            "VLC exited normally (status: 0)".to_string()
+                        } else if let Some(code) = exit_status.code() {
+                            format!("VLC exited with error code: {}", code)
+                        } else {
+                            "VLC terminated by signal".to_string()
+                        };
+
+                        return (false, Some(message));
+                    }
+                }
+
+                (is_running, None)
+            } else {
+                (false, None)
+            }
+        } else {
+            // Check regular process status
+            let mut process_guard = self.current_process.lock().await;
+            if let Some(child) = process_guard.as_mut() {
+                // Check if process is still running
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        // Process has exited
+                        *process_guard = None;
+
+                        let message = if status.success() {
+                            "Player exited normally".to_string()
+                        } else if let Some(code) = status.code() {
+                            format!("Player exited with error code: {}", code)
+                        } else {
+                            "Player terminated by signal".to_string()
+                        };
+
+                        (false, Some(message))
+                    }
+                    Ok(None) => {
+                        // Still running
+                        (true, None)
+                    }
+                    Err(_) => {
+                        // Error checking status
+                        *process_guard = None;
+                        (false, Some("Failed to check player status".to_string()))
+                    }
+                }
+            } else {
+                (false, None)
+            }
+        }
+    }
+
+    /// Check if player is currently running in TUI mode
     pub async fn is_playing_tui(&self) -> bool {
         if self.is_vlc() {
             // Check VLC status
@@ -323,5 +383,27 @@ impl Player {
                 false
             }
         }
+    }
+
+    /// Shutdown the player and clean up all resources
+    pub async fn shutdown(&self) -> Result<()> {
+        info!("Shutting down player");
+
+        if self.is_vlc() {
+            // Shutdown VLC if it's running
+            let mut vlc_guard = self.vlc_player.lock().await;
+            if let Some(mut vlc) = vlc_guard.take() {
+                let _ = vlc.shutdown().await;
+            }
+        } else {
+            // Kill regular process if running
+            let mut process_guard = self.current_process.lock().await;
+            if let Some(mut child) = process_guard.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+
+        Ok(())
     }
 }

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
 use anyhow::{Context, Result};
+use rand::Rng;
 use reqwest::Client;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
@@ -16,6 +17,7 @@ pub struct VlcPlayer {
     port: u16,
     password: String,
     vlc_process: Option<Child>,
+    last_exit_status: Option<std::process::ExitStatus>,
 }
 
 impl VlcPlayer {
@@ -25,7 +27,36 @@ impl VlcPlayer {
             port,
             password,
             vlc_process: None,
+            last_exit_status: None,
         }
+    }
+
+    /// Create a new VLC player with random port and password
+    pub fn new_random() -> Self {
+        let mut rng = rand::thread_rng();
+
+        // Generate random port between 40000-50000 (less likely to conflict)
+        let port = rng.gen_range(40000..50000);
+
+        // Generate random password (16 characters, alphanumeric)
+        let password: String = (0..16)
+            .map(|_| {
+                let idx = rng.gen_range(0..62);
+                match idx {
+                    0..10 => (b'0' + idx as u8) as char,
+                    10..36 => (b'a' + (idx - 10) as u8) as char,
+                    36..62 => (b'A' + (idx - 36) as u8) as char,
+                    _ => unreachable!(),
+                }
+            })
+            .collect();
+
+        info!(
+            "Creating VLC player with random port {} and secure password",
+            port
+        );
+
+        Self::new(port, password)
     }
 
     /// Start VLC with HTTP interface enabled
@@ -56,8 +87,12 @@ impl VlcPlayer {
             .arg("--http-password")
             .arg(&self.password)
             .arg("--no-video-title-show") // Don't show title on video
+            .arg("--no-qt-system-tray") // Disable system tray icon
+            .arg("--qt-auto-raise")
+            .arg("0") // Never auto-raise window (0=Never, prevents workspace switching)
             .arg("--qt-continue")
             .arg("0") // Never ask to continue playback (0=Never, 1=Ask, 2=Always)
+            .arg("--no-qt-video-autoresize") // Don't resize window to video size
             .arg("--verbose")
             .arg("2"); // Set verbose level for debugging
 
@@ -67,9 +102,8 @@ impl VlcPlayer {
             .stdin(Stdio::null());
 
         // Log the exact command being executed
-        info!("Starting VLC with command: vlc --intf http --extraintf qt --http-host 127.0.0.1 --http-port {} --http-password {} --no-video-title-show --qt-continue 0 --verbose 2",
-              self.port, 
-              if self.password.is_empty() { "(empty)" } else { "(set)" });
+        info!("Starting VLC with command: vlc --intf http --extraintf qt --http-host 127.0.0.1 --http-port {} --http-password {} --no-video-title-show --no-qt-system-tray --qt-auto-raise 0 --qt-continue 0 --no-qt-video-autoresize --verbose 2",
+              self.port, if self.password.is_empty() { "(empty)" } else { "(set)" });
         debug!("VLC command object: {:?}", cmd);
 
         let mut child = cmd
@@ -372,6 +406,12 @@ impl VlcPlayer {
         Ok(())
     }
 
+    /// Force shutdown VLC - always kills the process
+    pub async fn shutdown(&mut self) -> Result<()> {
+        info!("Shutting down VLC player");
+        self.stop_with_kill(true).await
+    }
+
     /// Check if VLC is running
     pub async fn is_running(&mut self) -> bool {
         // First check if we have a process handle and if it's still running
@@ -379,6 +419,7 @@ impl VlcPlayer {
             match proc.try_wait() {
                 Ok(Some(status)) => {
                     debug!("VLC process has exited with status: {:?}", status);
+                    self.last_exit_status = Some(status);
                     self.vlc_process = None;
                     return false;
                 }
@@ -402,6 +443,16 @@ impl VlcPlayer {
             debug!("VLC is_running returning true - HTTP interface is ready");
         }
         is_ready
+    }
+
+    /// Get the last exit status if VLC has exited
+    pub fn get_last_exit_status(&self) -> Option<std::process::ExitStatus> {
+        self.last_exit_status
+    }
+
+    /// Clear the last exit status (useful after acknowledging the exit)
+    pub fn clear_last_exit_status(&mut self) {
+        self.last_exit_status = None;
     }
 
     /// Pause playback
@@ -442,24 +493,26 @@ impl VlcPlayer {
 
 impl Drop for VlcPlayer {
     fn drop(&mut self) {
-        // Clean up VLC process on drop
-        // Note: In TUI mode, we intentionally don't kill VLC here to prevent
-        // Hyprland from switching workspaces. The process will be cleaned up
-        // when explicitly requested or on program exit.
+        // Always clean up VLC process on drop to ensure proper shutdown
         if let Some(mut child) = self.vlc_process.take() {
             // Check if the process is still running before attempting to kill
             match child.try_wait() {
                 Ok(Some(_)) => {
                     // Process already exited, nothing to do
+                    debug!("VLC process already exited");
                 }
                 Ok(None) => {
-                    // Process is still running
-                    // For now, we'll let it continue running to avoid workspace switches
-                    // The user can manually close VLC or it will be cleaned on next launch
-                    debug!("VLC process left running to prevent workspace switch");
+                    // Process is still running, kill it
+                    info!("Terminating VLC process on application exit");
+                    let _ = child.kill();
+                    let _ = child.wait();
                 }
-                Err(_) => {
+                Err(e) => {
                     // Error checking status, attempt cleanup anyway
+                    warn!(
+                        "Error checking VLC process status: {}, attempting cleanup",
+                        e
+                    );
                     let _ = child.kill();
                     let _ = child.wait();
                 }

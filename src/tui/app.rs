@@ -139,8 +139,26 @@ impl App {
 
     pub fn tick(&mut self) {
         // Update any time-based UI elements here
-        // Removed the player check as it was spawning tasks unnecessarily
-        // Player status will be checked when user presses a key
+        // Note: Player status check moved to async tick method in run_app
+    }
+
+    pub async fn async_tick(&mut self) {
+        // Check player status periodically to detect exits
+        if matches!(self.state, AppState::Playing(_)) {
+            let (is_running, exit_message) = self.player.check_player_status().await;
+
+            if !is_running {
+                // Return to main menu when player exits
+                self.state = AppState::MainMenu;
+                self.selected_index = 0;
+                self.scroll_offset = 0;
+                self.update_main_menu_items();
+
+                if let Some(message) = exit_message {
+                    self.add_log(format!("⚠️ {}", message));
+                }
+            }
+        }
     }
 
     pub async fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {

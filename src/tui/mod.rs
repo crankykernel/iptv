@@ -61,8 +61,11 @@ pub async fn run_tui(providers: Vec<ProviderConfig>, player: Player) -> Result<(
     let mut tui = Tui::new()?;
     tui.init()?;
 
-    let mut app = App::new(providers, player);
+    let mut app = App::new(providers, player.clone());
     let res = run_app(&mut tui, &mut app).await;
+
+    // Clean up player resources before exiting
+    let _ = player.shutdown().await;
 
     tui.exit()?;
 
@@ -102,6 +105,7 @@ async fn run_app(tui: &mut Tui, app: &mut App) -> Result<()> {
             Err(_) => {
                 // Timeout - periodic update
                 app.tick();
+                app.async_tick().await; // Check player status
                 matches!(app.state, app::AppState::Playing(_)) // Only redraw if playing
             }
         };
