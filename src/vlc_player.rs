@@ -54,6 +54,12 @@ impl VlcPlayer {
             .arg("--http-password")
             .arg(&self.password)
             .arg("--no-video-title-show") // Don't show title on video
+            .arg("--start-time=0") // Always start from beginning
+            .arg("--no-playlist-autostart") // Don't auto-start playlist items
+            .arg("--no-media-library") // Disable media library (prevents resume)
+            .arg("--no-auto-preparse") // Don't preparse files
+            .arg("--no-restore-playback-pos") // Don't restore playback position
+            .arg("--no-resume-playback") // Don't resume playback
             .arg("--verbose")
             .arg("2"); // Set verbose level for debugging
         
@@ -137,7 +143,7 @@ impl VlcPlayer {
             .http_client
             .get(&url)
             .basic_auth("", Some(&self.password))
-            .timeout(Duration::from_secs(1))
+            .timeout(Duration::from_secs(2))  // Increased timeout
             .send()
             .await
         {
