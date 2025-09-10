@@ -281,6 +281,14 @@ impl MpvPlayer {
         self.stop_with_kill(true).await
     }
 
+    /// Detach MPV process - let it continue running independently
+    pub fn detach(&mut self) {
+        debug!("Detaching MPV process - will continue running independently");
+        // Take ownership of the process handle without killing it
+        self.mpv_process.take();
+        // The socket file will remain for potential reconnection
+    }
+
     /// Check if MPV is running
     pub async fn is_running(&mut self) -> bool {
         // First check if we have a process handle and if it's still running

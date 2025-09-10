@@ -73,6 +73,35 @@ impl Player {
         Ok(())
     }
 
+    /// Play video in detached mode for rofi - starts MPV with RPC then exits
+    pub async fn play_detached(&self, url: &str) -> Result<()> {
+        if !self.use_mpv {
+            return Err(anyhow::anyhow!(
+                "MPV is not installed. Please install MPV to use this application."
+            ));
+        }
+
+        // Start MPV with RPC support
+        let mut mpv_guard = self.mpv_player.lock().await;
+
+        // Always start a fresh MPV instance for detached mode
+        if let Some(mut old_mpv) = mpv_guard.take() {
+            let _ = old_mpv.stop().await;
+        }
+
+        let mut mpv = MpvPlayer::new();
+        mpv.launch().await?;
+        mpv.play(url).await?;
+
+        // Detach the MPV process so it continues running after we exit
+        mpv.detach();
+
+        // Drop the mpv instance - it won't kill the process since we detached it
+        drop(mpv);
+
+        Ok(())
+    }
+
     /// Play video for TUI mode - runs in background with no terminal output
     pub async fn play_tui(&self, url: &str) -> Result<()> {
         debug!("Playing video in TUI mode");

@@ -217,8 +217,8 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
         println!("Starting: {}", selected_item.favourite.name);
 
         // Start mpv in background and exit immediately
-        // Use blocking to run the async play method
-        tokio::runtime::Runtime::new()?.block_on(async { player.play(&stream_url).await })?;
+        // Use the async play method directly since we're already in async context
+        player.play_detached(&stream_url).await?;
         println!("Player started in background");
     } else {
         eprintln!("Selected favourite not found: {}", selected_display);
