@@ -123,9 +123,25 @@ impl Player {
                 *vlc_guard = Some(vlc);
             }
 
-            // Play the video using HTTP interface
+            // Try to play, if VLC has exited, restart it
             if let Some(vlc) = vlc_guard.as_ref() {
-                vlc.play(url).await?;
+                match vlc.play(url).await {
+                    Ok(_) => return Ok(()),
+                    Err(e) if e.to_string().contains("VLC is not running") => {
+                        // VLC was closed by user, restart it
+                        drop(vlc_guard);
+                        let mut vlc_guard = self.vlc_player.lock().await;
+                        
+                        let mut vlc = VlcPlayer::new(
+                            self.config.vlc.http_port,
+                            self.config.vlc.http_password.clone(),
+                        );
+                        vlc.launch().await?;
+                        vlc.play(url).await?;
+                        *vlc_guard = Some(vlc);
+                    }
+                    Err(e) => return Err(e),
+                }
             }
         } else {
             // Use regular process-based approach for non-VLC players

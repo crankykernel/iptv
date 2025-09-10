@@ -87,6 +87,13 @@ impl VlcPlayer {
 
     /// Play or replace current video with new URL
     pub async fn play(&self, video_url: &str) -> Result<()> {
+        // Check if VLC is still running first
+        if !self.is_interface_ready().await {
+            return Err(anyhow::anyhow!(
+                "VLC is not running. Please restart the player."
+            ));
+        }
+
         // Stop current playback first
         let stop_url = format!(
             "http://127.0.0.1:{}/requests/status.xml?command=pl_stop",
@@ -106,12 +113,11 @@ impl VlcPlayer {
             self.port
         );
 
-        self.http_client
+        let _ = self.http_client
             .get(&clear_url)
             .basic_auth("", Some(&self.password))
             .send()
-            .await
-            .context("Failed to clear VLC playlist")?;
+            .await;
 
         // Then add and play the new video
         let play_url = format!(
