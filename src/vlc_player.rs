@@ -6,6 +6,7 @@ use reqwest::Client;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use tokio::time::sleep;
+use tracing::{debug, error, info, warn};
 
 pub struct VlcPlayer {
     http_client: Client,
@@ -26,6 +27,8 @@ impl VlcPlayer {
 
     /// Start VLC with HTTP interface enabled
     pub async fn launch(&mut self) -> Result<()> {
+        debug!("Launching VLC with HTTP interface on port {}", self.port);
+        
         // Kill any existing VLC process
         self.stop().await?;
 
@@ -42,27 +45,31 @@ impl VlcPlayer {
             .arg("--http-password")
             .arg(&self.password)
             .arg("--no-video-title-show") // Don't show title on video
-            .arg("--no-qt-error-dialogs") // Suppress error dialogs
             .arg("--quiet") // Reduce console output
-            .arg("--one-instance") // Reuse existing VLC instance if possible
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .stdin(Stdio::null());
 
+        debug!("Executing VLC command: {:?}", cmd);
+        
         let child = cmd
             .spawn()
             .context("Failed to start VLC. Is VLC installed?")?;
 
         self.vlc_process = Some(child);
+        info!("VLC process started, waiting for HTTP interface...");
 
         // Wait for HTTP interface to be ready
-        for _ in 0..10 {
+        for i in 0..10 {
             sleep(Duration::from_millis(500)).await;
             if self.is_interface_ready().await {
+                info!("VLC HTTP interface ready after {} ms", (i + 1) * 500);
                 return Ok(());
             }
+            debug!("VLC HTTP interface not ready yet, attempt {}/10", i + 1);
         }
 
+        error!("VLC HTTP interface failed to start after 5 seconds");
         Err(anyhow::anyhow!(
             "VLC HTTP interface failed to start after 5 seconds"
         ))
@@ -87,12 +94,18 @@ impl VlcPlayer {
 
     /// Play or replace current video with new URL
     pub async fn play(&self, video_url: &str) -> Result<()> {
+        debug!("Playing video: {}", video_url);
+        
         // Check if VLC is still running first
         if !self.is_interface_ready().await {
+            warn!("VLC is not running, cannot play video");
             return Err(anyhow::anyhow!(
                 "VLC is not running. Please restart the player."
             ));
         }
+
+        // Small delay to prevent overwhelming VLC
+        sleep(Duration::from_millis(100)).await;
 
         // Stop current playback first
         let stop_url = format!(
@@ -100,12 +113,17 @@ impl VlcPlayer {
             self.port
         );
 
+        debug!("Stopping current playback");
         let _ = self
             .http_client
             .get(&stop_url)
             .basic_auth("", Some(&self.password))
+            .timeout(Duration::from_secs(2))
             .send()
             .await;
+
+        // Small delay between commands
+        sleep(Duration::from_millis(100)).await;
 
         // Clear the playlist
         let clear_url = format!(
@@ -113,11 +131,16 @@ impl VlcPlayer {
             self.port
         );
 
+        debug!("Clearing playlist");
         let _ = self.http_client
             .get(&clear_url)
             .basic_auth("", Some(&self.password))
+            .timeout(Duration::from_secs(2))
             .send()
             .await;
+
+        // Small delay before adding new video
+        sleep(Duration::from_millis(100)).await;
 
         // Then add and play the new video
         let play_url = format!(
@@ -126,26 +149,33 @@ impl VlcPlayer {
             urlencoding::encode(video_url)
         );
 
+        debug!("Sending play command to VLC: {}", play_url);
+        
         let response = self
             .http_client
             .get(&play_url)
             .basic_auth("", Some(&self.password))
+            .timeout(Duration::from_secs(5))
             .send()
             .await
             .context("Failed to send play command to VLC")?;
 
         if !response.status().is_success() {
+            error!("VLC HTTP interface returned error: {}", response.status());
             return Err(anyhow::anyhow!(
                 "VLC HTTP interface returned error: {}",
                 response.status()
             ));
         }
 
+        info!("Successfully started playing video in VLC");
         Ok(())
     }
 
     /// Stop VLC playback
     pub async fn stop(&mut self) -> Result<()> {
+        debug!("Stopping VLC playback");
+        
         // Try to stop via HTTP first
         if self.is_interface_ready().await {
             let stop_url = format!(
@@ -163,8 +193,10 @@ impl VlcPlayer {
 
         // Kill the process if it exists
         if let Some(mut child) = self.vlc_process.take() {
+            debug!("Killing VLC process");
             let _ = child.kill();
             let _ = child.wait();
+            info!("VLC process terminated");
         }
 
         Ok(())

@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::fs::File;
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
@@ -27,6 +28,10 @@ struct Cli {
     /// Use TUI (Terminal User Interface) mode
     #[arg(long)]
     tui: bool,
+
+    /// Enable debug logging to file (iptv_debug.log)
+    #[arg(long)]
+    debug_log: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -223,18 +228,33 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Initialize tracing
-    let filter = if cli.verbose {
+    let filter = if cli.verbose || cli.debug_log {
         EnvFilter::new("debug,reqwest=warn,h2=warn,hyper=warn")
     } else {
         EnvFilter::new("info,reqwest=warn,h2=warn,hyper=warn")
     };
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(false)
-        .with_level(true)
-        .without_time()
-        .init();
+    if cli.debug_log && cli.tui {
+        // Setup file logging for TUI debug mode
+        let debug_file = File::create("iptv_debug.log")?;
+        
+        // In TUI mode with debug, only log to file
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(debug_file)
+            .with_ansi(false)
+            .with_target(true)
+            .with_line_number(true)
+            .init();
+    } else {
+        // Normal logging to console
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .with_level(true)
+            .without_time()
+            .init();
+    }
 
     // Determine config file path
     let config_path = cli.config.unwrap_or_else(|| {

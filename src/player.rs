@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{debug, error, info, warn};
 
 pub struct Player {
     config: PlayerConfig,
@@ -109,38 +110,57 @@ impl Player {
 
     /// Play video for TUI mode - runs in background with no terminal output
     pub async fn play_tui(&self, url: &str) -> Result<()> {
+        debug!("Playing video in TUI mode: {}", url);
+        
         if self.is_vlc() {
             // Use VLC HTTP interface for TUI mode
             let mut vlc_guard = self.vlc_player.lock().await;
 
-            // Initialize VLC player if needed
-            if vlc_guard.is_none() {
+            // Check if we need to initialize or restart VLC
+            let needs_restart = if let Some(vlc) = vlc_guard.as_mut() {
+                // Check if VLC is still running
+                !vlc.is_running().await
+            } else {
+                true
+            };
+
+            if needs_restart {
+                info!("Starting new VLC instance");
+                // Clean up old instance if exists
+                if let Some(mut old_vlc) = vlc_guard.take() {
+                    debug!("Cleaning up old VLC instance");
+                    let _ = old_vlc.stop().await;
+                }
+                
+                // Create and launch new instance
                 let mut vlc = VlcPlayer::new(
                     self.config.vlc.http_port,
                     self.config.vlc.http_password.clone(),
                 );
                 vlc.launch().await?;
+                vlc.play(url).await?;
                 *vlc_guard = Some(vlc);
-            }
-
-            // Try to play, if VLC has exited, restart it
-            if let Some(vlc) = vlc_guard.as_ref() {
-                match vlc.play(url).await {
-                    Ok(_) => return Ok(()),
-                    Err(e) if e.to_string().contains("VLC is not running") => {
-                        // VLC was closed by user, restart it
-                        drop(vlc_guard);
-                        let mut vlc_guard = self.vlc_player.lock().await;
-                        
-                        let mut vlc = VlcPlayer::new(
-                            self.config.vlc.http_port,
-                            self.config.vlc.http_password.clone(),
-                        );
-                        vlc.launch().await?;
-                        vlc.play(url).await?;
-                        *vlc_guard = Some(vlc);
+            } else {
+                // VLC is running, just play the new video
+                if let Some(vlc) = vlc_guard.as_ref() {
+                    match vlc.play(url).await {
+                        Ok(_) => {},
+                        Err(e) => {
+                            error!("Failed to play video: {}", e);
+                            // Try to restart VLC
+                            warn!("Attempting to restart VLC after play failure");
+                            drop(vlc_guard);
+                            let mut vlc_guard = self.vlc_player.lock().await;
+                            
+                            let mut vlc = VlcPlayer::new(
+                                self.config.vlc.http_port,
+                                self.config.vlc.http_password.clone(),
+                            );
+                            vlc.launch().await?;
+                            vlc.play(url).await?;
+                            *vlc_guard = Some(vlc);
+                        }
                     }
-                    Err(e) => return Err(e),
                 }
             }
         } else {
