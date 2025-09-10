@@ -26,6 +26,23 @@ pub struct ProviderConfig {
 pub struct PlayerConfig {
     pub command: String,
     pub args: Vec<String>,
+    #[serde(default)]
+    pub vlc: VlcConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VlcConfig {
+    pub http_port: u16,
+    pub http_password: String,
+}
+
+impl Default for VlcConfig {
+    fn default() -> Self {
+        Self {
+            http_port: 8080,
+            http_password: "vlcremote".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,8 +68,9 @@ impl Default for Config {
                 password: "your-password".to_string(),
             }],
             player: PlayerConfig {
-                command: "mpv".to_string(),
-                args: vec!["--fs".to_string(), "--quiet".to_string()],
+                command: "vlc".to_string(),
+                args: vec![],
+                vlc: VlcConfig::default(),
             },
             cache: CacheConfig { max_entries: 1000 },
             ui: UiConfig {

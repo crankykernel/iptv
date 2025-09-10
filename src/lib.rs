@@ -7,6 +7,7 @@ pub mod favourites;
 pub mod menu;
 pub mod player;
 pub mod tui;
+pub mod vlc_player;
 pub mod xtream_api;
 
 pub use cache::CacheManager;

@@ -14,8 +14,12 @@ username = "your-username-2"
 password = "your-password-2"
 
 [player]
-command = "mpv"
-args = ["--fs", "--quiet"]
+command = "vlc"
+args = []
+
+[player.vlc]
+http_port = 8080
+http_password = "vlcremote"
 
 [cache]
 ttl_seconds = 3600
