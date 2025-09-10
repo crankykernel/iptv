@@ -8,8 +8,6 @@ use crate::xtream_api::{
     ApiEpisode, Category, FavouriteStream, Stream, VodInfoResponse, XTreamAPI,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use fuzzy_matcher::FuzzyMatcher;
-use fuzzy_matcher::skim::SkimMatcherV2;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -1822,18 +1820,15 @@ impl App {
         if self.search_query.is_empty() {
             self.filtered_indices = (0..self.items.len()).collect();
         } else {
-            let matcher = SkimMatcherV2::default();
-            let mut scored_items: Vec<(usize, i64)> = Vec::new();
-
-            for (idx, item) in self.items.iter().enumerate() {
-                if let Some(score) = matcher.fuzzy_match(item, &self.search_query) {
-                    scored_items.push((idx, score));
-                }
-            }
-
-            // Sort by score (highest first)
-            scored_items.sort_by(|a, b| b.1.cmp(&a.1));
-            self.filtered_indices = scored_items.into_iter().map(|(idx, _)| idx).collect();
+            // Case-insensitive substring search
+            let query_lower = self.search_query.to_lowercase();
+            self.filtered_indices = self
+                .items
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| item.to_lowercase().contains(&query_lower))
+                .map(|(idx, _)| idx)
+                .collect();
         }
 
         // Reset selection to first filtered item

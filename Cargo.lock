@@ -1085,7 +1085,6 @@ dependencies = [
  "crossterm 0.29.0",
  "dirs",
  "futures-util",
- "fuzzy-matcher",
  "indicatif",
  "inquire",
  "libc",
