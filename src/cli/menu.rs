@@ -335,6 +335,8 @@ impl MenuSystem {
             return Ok(());
         }
 
+        let mut last_selected_index = 0;
+
         loop {
             let favourite_options: Vec<String> = all_favourites
                 .iter()
@@ -344,15 +346,29 @@ impl MenuSystem {
                 })
                 .collect();
 
-            let selection = Select::new("Select a favourite:", favourite_options.clone())
-                .with_page_size(self.page_size)
-                .prompt_skippable()?;
+            // Adjust cursor if it's out of bounds (e.g., after deletion)
+            if last_selected_index >= favourite_options.len() {
+                last_selected_index = favourite_options.len().saturating_sub(1);
+            }
+
+            let mut select = Select::new("Select a favourite:", favourite_options.clone())
+                .with_page_size(self.page_size);
+
+            select = select.with_starting_cursor(last_selected_index);
+            debug!(
+                "Showing all favourites menu with cursor at index {}",
+                last_selected_index
+            );
+            let selection = select.prompt_skippable()?;
 
             if let Some(selected_name) = selection {
                 let selected_index = favourite_options
                     .iter()
                     .position(|name| name == &selected_name)
                     .unwrap();
+
+                // Remember the selected index for when we return
+                last_selected_index = selected_index;
 
                 let (selected_favourite, provider) = &all_favourites[selected_index];
 
@@ -424,6 +440,10 @@ impl MenuSystem {
             .with_page_size(self.page_size);
 
             select = select.with_starting_cursor(last_selected_index);
+            debug!(
+                "Showing favourites menu with cursor at index {}",
+                last_selected_index
+            );
             let selection = select.prompt_skippable()?;
 
             if let Some(selected_name) = selection {

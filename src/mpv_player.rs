@@ -11,7 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 pub struct MpvPlayer {
     socket_path: PathBuf,
@@ -127,7 +127,7 @@ impl MpvPlayer {
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
 
-        info!("Starting MPV with IPC socket at: {:?}", self.socket_path);
+        debug!("Starting MPV with IPC socket at: {:?}", self.socket_path);
         debug!("MPV command: {:?}", cmd);
 
         let mut child = cmd
@@ -166,7 +166,7 @@ impl MpvPlayer {
         }
 
         self.mpv_process = Some(child);
-        info!("MPV process started, waiting for IPC socket...");
+        debug!("MPV process started, waiting for IPC socket...");
 
         // Wait for IPC socket to be ready
         for i in 0..20 {
@@ -193,7 +193,7 @@ impl MpvPlayer {
             }
 
             if self.is_socket_ready().await {
-                info!("MPV IPC socket ready after {} ms", (i + 1) * 500);
+                debug!("MPV IPC socket ready after {} ms", (i + 1) * 500);
                 return Ok(());
             }
             debug!("MPV IPC socket not ready yet, attempt {}/20", i + 1);
@@ -232,7 +232,7 @@ impl MpvPlayer {
         self.send_command(command)
             .context("Failed to send play command to MPV")?;
 
-        info!("Successfully started playing video in MPV");
+        debug!("Successfully started playing video in MPV");
         Ok(())
     }
 
@@ -263,7 +263,7 @@ impl MpvPlayer {
                 debug!("Killing MPV process");
                 let _ = child.kill();
                 let _ = child.wait();
-                info!("MPV process terminated");
+                debug!("MPV process terminated");
             }
 
             // Clean up socket file
@@ -277,7 +277,7 @@ impl MpvPlayer {
 
     /// Force shutdown MPV
     pub async fn shutdown(&mut self) -> Result<()> {
-        info!("Shutting down MPV player");
+        debug!("Shutting down MPV player");
         self.stop_with_kill(true).await
     }
 
@@ -379,7 +379,7 @@ impl Drop for MpvPlayer {
                     debug!("MPV process already exited");
                 }
                 Ok(None) => {
-                    info!("Terminating MPV process on cleanup");
+                    debug!("Terminating MPV process on cleanup");
                     let _ = child.kill();
                     let _ = child.wait();
                 }
