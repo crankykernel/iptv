@@ -13,14 +13,6 @@ url = "https://another-server.com:port/player_api.php"
 username = "your-username-2"
 password = "your-password-2"
 
-[player]
-command = "vlc"
-args = []
-
-[player.vlc]
-http_port = 8080
-http_password = "vlcremote"
-
 [cache]
 ttl_seconds = 3600
 max_entries = 1000

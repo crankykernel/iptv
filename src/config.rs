@@ -10,8 +10,6 @@ use std::path::{Path, PathBuf};
 pub struct Config {
     pub providers: Vec<ProviderConfig>,
     #[serde(default)]
-    pub player: PlayerConfig,
-    #[serde(default)]
     pub cache: CacheConfig,
     #[serde(default)]
     pub ui: UiConfig,
@@ -23,39 +21,6 @@ pub struct ProviderConfig {
     pub url: String,
     pub username: String,
     pub password: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlayerConfig {
-    pub command: String,
-    pub args: Vec<String>,
-    #[serde(default)]
-    pub vlc: VlcConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VlcConfig {
-    pub http_port: u16,
-    pub http_password: String,
-}
-
-impl Default for VlcConfig {
-    fn default() -> Self {
-        Self {
-            http_port: 8080,
-            http_password: "vlcremote".to_string(),
-        }
-    }
-}
-
-impl Default for PlayerConfig {
-    fn default() -> Self {
-        Self {
-            command: "vlc".to_string(),
-            args: vec![],
-            vlc: VlcConfig::default(),
-        }
-    }
 }
 
 impl Default for CacheConfig {
@@ -96,7 +61,6 @@ impl Default for Config {
                 username: "your-username".to_string(),
                 password: "your-password".to_string(),
             }],
-            player: PlayerConfig::default(),
             cache: CacheConfig::default(),
             ui: UiConfig::default(),
         }

@@ -299,8 +299,8 @@ async fn main() -> Result<()> {
         return Ok(());
     };
 
-    // Initialize player
-    let player = Player::new(config.player.clone());
+    // Initialize player (automatically uses MPV if available)
+    let player = Player::new();
 
     // Handle subcommands
     match cli.command {

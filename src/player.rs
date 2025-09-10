@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
-use crate::config::PlayerConfig;
-use crate::vlc_player::VlcPlayer;
+use crate::mpv_player::MpvPlayer;
 use anyhow::{Context, Result};
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
@@ -12,74 +11,94 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 pub struct Player {
-    config: PlayerConfig,
-    current_process: Arc<Mutex<Option<Child>>>,
-    vlc_player: Arc<Mutex<Option<VlcPlayer>>>,
+    mpv_player: Arc<Mutex<Option<MpvPlayer>>>,
+    fallback_process: Arc<Mutex<Option<Child>>>,
+    use_mpv: bool,
 }
 
 impl Clone for Player {
     fn clone(&self) -> Self {
         Self {
-            config: self.config.clone(),
-            current_process: Arc::new(Mutex::new(None)),
-            vlc_player: Arc::new(Mutex::new(None)),
+            mpv_player: Arc::new(Mutex::new(None)),
+            fallback_process: Arc::new(Mutex::new(None)),
+            use_mpv: self.use_mpv,
         }
     }
 }
 
 impl Player {
-    pub fn new(config: PlayerConfig) -> Self {
+    pub fn new() -> Self {
+        let use_mpv = Self::is_mpv_available();
+
+        if use_mpv {
+            info!("MPV detected and will be used as the video player");
+        } else {
+            error!("MPV not found! Please install MPV for the best experience.");
+            warn!("Falling back to basic player mode without remote control support");
+        }
+
         Self {
-            config,
-            current_process: Arc::new(Mutex::new(None)),
-            vlc_player: Arc::new(Mutex::new(None)),
+            mpv_player: Arc::new(Mutex::new(None)),
+            fallback_process: Arc::new(Mutex::new(None)),
+            use_mpv,
         }
     }
 
-    fn is_vlc(&self) -> bool {
-        self.config.command.to_lowercase() == "vlc"
+    fn is_mpv_available() -> bool {
+        Command::new("mpv")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
+    pub fn is_available(&self) -> bool {
+        self.use_mpv
     }
 
     pub fn play(&self, url: &str) -> Result<()> {
-        // For VLC in CLI mode, use regular process spawning (not HTTP)
-        // This allows VLC to run in foreground with full UI
-        let mut cmd = Command::new(&self.config.command);
-
-        // Add configured arguments
-        for arg in &self.config.args {
-            cmd.arg(arg);
+        if !self.use_mpv {
+            return Err(anyhow::anyhow!(
+                "MPV is not installed. Please install MPV to use this application."
+            ));
         }
+
+        // For CLI mode, use regular process spawning
+        let mut cmd = Command::new("mpv");
 
         // Add the URL
         cmd.arg(url);
 
-        println!("Starting player: {} {}", self.config.command, url);
+        println!("Starting MPV: {}", url);
         println!("Press Ctrl+C or quit the player to return to the menu");
 
         // Run the process in the foreground and wait for it to complete
-        let status = cmd.status().with_context(|| {
-            format!("Failed to execute player command: {}", self.config.command)
-        })?;
+        let status = cmd
+            .status()
+            .context("Failed to execute MPV. Is MPV installed?")?;
 
         if !status.success() {
-            eprintln!("Player exited with error code: {}", status);
+            eprintln!("MPV exited with error code: {}", status);
             return Err(anyhow::anyhow!(
-                "Player process failed with exit code: {}",
+                "MPV process failed with exit code: {}",
                 status
             ));
         }
 
-        println!("Player exited successfully");
+        println!("MPV exited successfully");
         Ok(())
     }
 
     pub fn play_background(&self, url: &str) -> Result<()> {
-        let mut cmd = Command::new(&self.config.command);
-
-        // Add configured arguments
-        for arg in &self.config.args {
-            cmd.arg(arg);
+        if !self.use_mpv {
+            return Err(anyhow::anyhow!(
+                "MPV is not installed. Please install MPV to use this application."
+            ));
         }
+
+        let mut cmd = Command::new("mpv");
 
         // Add the URL
         cmd.arg(url);
@@ -90,12 +109,7 @@ impl Player {
             .stdin(Stdio::null());
 
         // Start the process in background
-        let mut child = cmd.spawn().with_context(|| {
-            format!(
-                "Failed to start player in background: {}",
-                self.config.command
-            )
-        })?;
+        let mut child = cmd.spawn().context("Failed to start MPV in background")?;
 
         // Spawn threads to consume stdout and stderr
         if let Some(stdout) = child.stdout.take() {
@@ -120,107 +134,77 @@ impl Player {
         Ok(())
     }
 
-    pub fn is_available(&self) -> bool {
-        Command::new(&self.config.command)
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
-
     /// Play video for TUI mode - runs in background with no terminal output
     pub async fn play_tui(&self, url: &str) -> Result<()> {
-        debug!("Playing video in TUI mode: {}", url);
+        debug!("Playing video in TUI mode");
 
-        if self.is_vlc() {
-            // Use VLC HTTP interface for TUI mode
-            let mut vlc_guard = self.vlc_player.lock().await;
+        if self.use_mpv {
+            // Use MPV IPC socket for TUI mode
+            let mut mpv_guard = self.mpv_player.lock().await;
 
-            // Check if we need to initialize or restart VLC
-            let needs_restart = if let Some(vlc) = vlc_guard.as_mut() {
-                // Check if the HTTP interface is still responding
-                let is_running = vlc.is_running().await;
-                debug!("VLC is_running check returned: {}", is_running);
+            // Check if we need to initialize or restart MPV
+            let needs_restart = if let Some(mpv) = mpv_guard.as_mut() {
+                let is_running = mpv.is_running().await;
+                debug!("MPV is_running check returned: {}", is_running);
                 if !is_running {
-                    info!("VLC is not responding, will restart");
+                    info!("MPV is not responding, will restart");
                 }
                 !is_running
             } else {
-                debug!("No VLC instance found in guard");
+                debug!("No MPV instance found in guard");
                 true
             };
 
             if needs_restart {
-                info!("Starting new VLC instance");
-                // Clean up old instance if exists
-                if let Some(mut old_vlc) = vlc_guard.take() {
-                    debug!("Cleaning up old VLC instance");
-                    let _ = old_vlc.stop().await;
+                info!("Starting new MPV instance");
+                if let Some(mut old_mpv) = mpv_guard.take() {
+                    debug!("Cleaning up old MPV instance");
+                    let _ = old_mpv.stop().await;
                 }
 
-                // Create and launch new instance with random port/password
-                let mut vlc = VlcPlayer::new_random();
-                vlc.launch().await?;
-                vlc.play(url).await?;
-                *vlc_guard = Some(vlc);
-            } else {
-                // VLC is running, just play the new video
-                if let Some(vlc) = vlc_guard.as_ref() {
-                    match vlc.play(url).await {
-                        Ok(_) => {}
-                        Err(e) => {
-                            error!("Failed to play video: {}", e);
-                            // Try to restart VLC
-                            warn!("Attempting to restart VLC after play failure");
-                            drop(vlc_guard);
-                            let mut vlc_guard = self.vlc_player.lock().await;
+                let mut mpv = MpvPlayer::new();
+                mpv.launch().await?;
+                mpv.play(url).await?;
+                *mpv_guard = Some(mpv);
+            } else if let Some(mpv) = mpv_guard.as_ref() {
+                match mpv.play(url).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("Failed to play video: {}", e);
+                        warn!("Attempting to restart MPV after play failure");
+                        drop(mpv_guard);
+                        let mut mpv_guard = self.mpv_player.lock().await;
 
-                            let mut vlc = VlcPlayer::new_random();
-                            vlc.launch().await?;
-                            vlc.play(url).await?;
-                            *vlc_guard = Some(vlc);
-                        }
+                        let mut mpv = MpvPlayer::new();
+                        mpv.launch().await?;
+                        mpv.play(url).await?;
+                        *mpv_guard = Some(mpv);
                     }
                 }
             }
         } else {
-            // Use regular process-based approach for non-VLC players
-            // Stop any existing playback first (but don't wait for it)
+            // Fallback mode - just try to launch MPV directly without IPC
+            // This won't have remote control but at least will play
+            warn!("MPV not detected, attempting fallback launch");
+
+            // Stop any existing playback first
             {
-                let mut process_guard = self.current_process.lock().await;
+                let mut process_guard = self.fallback_process.lock().await;
                 if let Some(mut child) = process_guard.take() {
                     let _ = child.kill();
-                    // Don't wait - let it terminate in background
                 }
             }
 
-            // Clone values needed in the closure
-            let player_cmd = self.config.command.clone();
-            let player_args = self.config.args.clone();
             let url = url.to_string();
 
-            // Spawn the process in a completely detached way
             let mut child = tokio::task::spawn_blocking(move || {
-                let mut cmd = Command::new(&player_cmd);
+                let mut cmd = Command::new("mpv");
 
-                // Add configured arguments
-                for arg in &player_args {
-                    cmd.arg(arg);
-                }
-
-                // Add arguments to suppress terminal output and run in background
-                // These work for mpv - might need adjustment for other players
+                // Try to suppress terminal output
                 cmd.arg("--no-terminal");
-                cmd.arg("--really-quiet"); // Suppress all console output
-                cmd.arg("--force-window=immediate"); // Show window immediately
-                cmd.arg("--keep-open=no");
-
-                // Add the URL
+                cmd.arg("--really-quiet");
                 cmd.arg(&url);
 
-                // Pipe stdout/stderr so we can consume them to prevent blocking
                 cmd.stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .stdin(Stdio::null());
@@ -229,14 +213,13 @@ impl Player {
             })
             .await
             .with_context(|| "Failed to spawn blocking task")?
-            .with_context(|| format!("Failed to start player: {}", self.config.command))?;
+            .with_context(|| "Failed to start MPV - is it installed?")?;
 
-            // Spawn threads to consume stdout and stderr to prevent blocking
             if let Some(stdout) = child.stdout.take() {
                 thread::spawn(move || {
                     let reader = BufReader::new(stdout);
                     for _ in reader.lines() {
-                        // Just consume the output, don't process it
+                        // Just consume the output
                     }
                 });
             }
@@ -245,14 +228,13 @@ impl Player {
                 thread::spawn(move || {
                     let reader = BufReader::new(stderr);
                     for _ in reader.lines() {
-                        // Just consume the output, don't process it
+                        // Just consume the output
                     }
                 });
             }
 
-            // Store the process handle - minimize lock time
             {
-                let mut process_guard = self.current_process.lock().await;
+                let mut process_guard = self.fallback_process.lock().await;
                 *process_guard = Some(child);
             }
         }
@@ -262,21 +244,15 @@ impl Player {
 
     /// Stop TUI playback
     pub async fn stop_tui(&self) -> Result<()> {
-        if self.is_vlc() {
-            // Stop VLC playback but keep the window open
-            let mut vlc_guard = self.vlc_player.lock().await;
-            if let Some(vlc) = vlc_guard.as_mut() {
-                // Stop playback but don't kill the process - keeps VLC window open
-                vlc.stop_with_kill(false).await?;
+        if self.use_mpv {
+            let mut mpv_guard = self.mpv_player.lock().await;
+            if let Some(mpv) = mpv_guard.as_mut() {
+                mpv.stop_with_kill(false).await?;
             }
         } else {
-            // Stop regular process
-            let mut process_guard = self.current_process.lock().await;
+            let mut process_guard = self.fallback_process.lock().await;
             if let Some(mut child) = process_guard.take() {
-                // Try to kill the process
                 let _ = child.kill();
-                // Don't wait - just let it terminate in the background
-                // child.wait() would block the TUI
             }
         }
         Ok(())
@@ -285,23 +261,21 @@ impl Player {
     /// Check if player is currently running in TUI mode
     /// Returns (is_running, exit_message)
     pub async fn check_player_status(&self) -> (bool, Option<String>) {
-        if self.is_vlc() {
-            // Check VLC status
-            let mut vlc_guard = self.vlc_player.lock().await;
-            if let Some(vlc) = vlc_guard.as_mut() {
-                let is_running = vlc.is_running().await;
+        if self.use_mpv {
+            let mut mpv_guard = self.mpv_player.lock().await;
+            if let Some(mpv) = mpv_guard.as_mut() {
+                let is_running = mpv.is_running().await;
 
-                // Check if VLC has exited and report the status
                 if !is_running {
-                    if let Some(exit_status) = vlc.get_last_exit_status() {
-                        vlc.clear_last_exit_status();
+                    if let Some(exit_status) = mpv.get_last_exit_status() {
+                        mpv.clear_last_exit_status();
 
                         let message = if exit_status.success() {
-                            "VLC exited normally (status: 0)".to_string()
+                            "MPV exited normally (status: 0)".to_string()
                         } else if let Some(code) = exit_status.code() {
-                            format!("VLC exited with error code: {}", code)
+                            format!("MPV exited with error code: {}", code)
                         } else {
-                            "VLC terminated by signal".to_string()
+                            "MPV terminated by signal".to_string()
                         };
 
                         return (false, Some(message));
@@ -313,13 +287,10 @@ impl Player {
                 (false, None)
             }
         } else {
-            // Check regular process status
-            let mut process_guard = self.current_process.lock().await;
+            let mut process_guard = self.fallback_process.lock().await;
             if let Some(child) = process_guard.as_mut() {
-                // Check if process is still running
                 match child.try_wait() {
                     Ok(Some(status)) => {
-                        // Process has exited
                         *process_guard = None;
 
                         let message = if status.success() {
@@ -332,12 +303,8 @@ impl Player {
 
                         (false, Some(message))
                     }
-                    Ok(None) => {
-                        // Still running
-                        (true, None)
-                    }
+                    Ok(None) => (true, None),
                     Err(_) => {
-                        // Error checking status
                         *process_guard = None;
                         (false, Some("Failed to check player status".to_string()))
                     }
@@ -350,31 +317,23 @@ impl Player {
 
     /// Check if player is currently running in TUI mode
     pub async fn is_playing_tui(&self) -> bool {
-        if self.is_vlc() {
-            // Check VLC status
-            let mut vlc_guard = self.vlc_player.lock().await;
-            if let Some(vlc) = vlc_guard.as_mut() {
-                vlc.is_running().await
+        if self.use_mpv {
+            let mut mpv_guard = self.mpv_player.lock().await;
+            if let Some(mpv) = mpv_guard.as_mut() {
+                mpv.is_running().await
             } else {
                 false
             }
         } else {
-            // Check regular process status
-            let mut process_guard = self.current_process.lock().await;
+            let mut process_guard = self.fallback_process.lock().await;
             if let Some(child) = process_guard.as_mut() {
-                // Check if process is still running
                 match child.try_wait() {
                     Ok(Some(_)) => {
-                        // Process has exited
                         *process_guard = None;
                         false
                     }
-                    Ok(None) => {
-                        // Still running
-                        true
-                    }
+                    Ok(None) => true,
                     Err(_) => {
-                        // Error checking status
                         *process_guard = None;
                         false
                     }
@@ -389,15 +348,13 @@ impl Player {
     pub async fn shutdown(&self) -> Result<()> {
         info!("Shutting down player");
 
-        if self.is_vlc() {
-            // Shutdown VLC if it's running
-            let mut vlc_guard = self.vlc_player.lock().await;
-            if let Some(mut vlc) = vlc_guard.take() {
-                let _ = vlc.shutdown().await;
+        if self.use_mpv {
+            let mut mpv_guard = self.mpv_player.lock().await;
+            if let Some(mut mpv) = mpv_guard.take() {
+                let _ = mpv.shutdown().await;
             }
         } else {
-            // Kill regular process if running
-            let mut process_guard = self.current_process.lock().await;
+            let mut process_guard = self.fallback_process.lock().await;
             if let Some(mut child) = process_guard.take() {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -405,5 +362,11 @@ impl Player {
         }
 
         Ok(())
+    }
+}
+
+impl Default for Player {
+    fn default() -> Self {
+        Self::new()
     }
 }
