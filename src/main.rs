@@ -237,7 +237,7 @@ async fn main() -> Result<()> {
     if cli.debug_log && cli.tui {
         // Setup file logging for TUI debug mode
         let debug_file = File::create("iptv_debug.log")?;
-        
+
         // In TUI mode with debug, only log to file
         tracing_subscriber::fmt()
             .with_env_filter(filter)

@@ -4,7 +4,9 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
+use std::thread;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
@@ -29,13 +31,13 @@ impl VlcPlayer {
     /// Start VLC with HTTP interface enabled
     pub async fn launch(&mut self) -> Result<()> {
         debug!("Launching VLC with HTTP interface on port {}", self.port);
-        
+
         // Check if VLC is already running
         if self.is_interface_ready().await {
             debug!("VLC is already running, skipping launch");
             return Ok(());
         }
-        
+
         // Only stop if we have an existing process that's not responding
         if self.vlc_process.is_some() {
             self.stop().await?;
@@ -58,76 +60,146 @@ impl VlcPlayer {
             .arg("0") // Never ask to continue playback (0=Never, 1=Ask, 2=Always)
             .arg("--verbose")
             .arg("2"); // Set verbose level for debugging
-        
-        // If debug logging is enabled, redirect VLC output to log files
-        if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
-            // Try to open log files for VLC output
-            match OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("vlc_stdout.log")
-            {
-                Ok(mut stdout_file) => {
-                    // Write timestamp marker
-                    use std::io::Write;
-                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-                    let _ = writeln!(stdout_file, "\n=== VLC Started at {} ===", timestamp);
-                    cmd.stdout(stdout_file);
-                    debug!("VLC stdout will be logged to vlc_stdout.log");
-                }
-                Err(e) => {
-                    warn!("Failed to open vlc_stdout.log: {}", e);
-                    cmd.stdout(Stdio::null());
-                }
-            }
-            
-            match OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("vlc_stderr.log")
-            {
-                Ok(mut stderr_file) => {
-                    // Write timestamp marker
-                    use std::io::Write;
-                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-                    let _ = writeln!(stderr_file, "\n=== VLC Started at {} ===", timestamp);
-                    cmd.stderr(stderr_file);
-                    debug!("VLC stderr will be logged to vlc_stderr.log");
-                }
-                Err(e) => {
-                    warn!("Failed to open vlc_stderr.log: {}", e);
-                    cmd.stderr(Stdio::null());
-                }
-            }
-        } else {
-            cmd.stdout(Stdio::null())
-                .stderr(Stdio::null());
-        }
-        
-        cmd.stdin(Stdio::null());
 
-        debug!("Executing VLC command: {:?}", cmd);
-        
-        let child = cmd
+        // Always pipe stdout and stderr so we can consume them
+        cmd.stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
+
+        // Log the exact command being executed
+        info!("Starting VLC with command: vlc --intf http --extraintf qt --http-host 127.0.0.1 --http-port {} --http-password {} --no-video-title-show --qt-continue 0 --verbose 2",
+              self.port, 
+              if self.password.is_empty() { "(empty)" } else { "(set)" });
+        debug!("VLC command object: {:?}", cmd);
+
+        let mut child = cmd
             .spawn()
             .context("Failed to start VLC. Is VLC installed?")?;
 
+        // Spawn threads to consume stdout and stderr to prevent blocking
+        let debug_file_logging = std::env::var("RUST_LOG")
+            .unwrap_or_default()
+            .contains("debug");
+
+        // Handle stdout
+        if let Some(stdout) = child.stdout.take() {
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                let mut log_file = if debug_file_logging {
+                    OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("vlc_stdout.log")
+                        .ok()
+                        .map(|mut f| {
+                            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+                            let _ = writeln!(f, "\n=== VLC Started at {} ===", timestamp);
+                            f
+                        })
+                } else {
+                    None
+                };
+
+                for line in reader.lines().map_while(Result::ok) {
+                    // Always log to debug output
+                    debug!("VLC stdout: {}", line);
+
+                    if let Some(ref mut file) = log_file {
+                        let _ = writeln!(file, "{}", line);
+                    }
+                }
+            });
+            debug!("VLC stdout consumer thread started");
+        }
+
+        // Handle stderr
+        if let Some(stderr) = child.stderr.take() {
+            thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                let mut log_file = if debug_file_logging {
+                    OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("vlc_stderr.log")
+                        .ok()
+                        .map(|mut f| {
+                            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+                            let _ = writeln!(f, "\n=== VLC Started at {} ===", timestamp);
+                            f
+                        })
+                } else {
+                    None
+                };
+
+                for line in reader.lines().map_while(Result::ok) {
+                    // Always log to debug output, use warn for stderr as it often contains important info
+                    if line.contains("error") || line.contains("ERROR") {
+                        warn!("VLC stderr: {}", line);
+                    } else {
+                        debug!("VLC stderr: {}", line);
+                    }
+
+                    if let Some(ref mut file) = log_file {
+                        let _ = writeln!(file, "{}", line);
+                    }
+                }
+            });
+            debug!("VLC stderr consumer thread started");
+        }
+
         self.vlc_process = Some(child);
-        info!("VLC process started, waiting for HTTP interface...");
+        info!("VLC process started with PID, waiting for HTTP interface...");
 
         // Wait for HTTP interface to be ready
         for i in 0..10 {
             sleep(Duration::from_millis(500)).await;
+
+            // Check if process is still running
+            if let Some(ref mut proc) = self.vlc_process {
+                match proc.try_wait() {
+                    Ok(Some(status)) => {
+                        error!("VLC process exited unexpectedly with status: {:?}", status);
+                        return Err(anyhow::anyhow!(
+                            "VLC process exited unexpectedly with status: {:?}. Check debug logs for VLC output.", 
+                            status
+                        ));
+                    }
+                    Ok(None) => {
+                        // Process is still running, continue checking
+                    }
+                    Err(e) => {
+                        warn!("Failed to check VLC process status: {}", e);
+                    }
+                }
+            }
+
             if self.is_interface_ready().await {
                 info!("VLC HTTP interface ready after {} ms", (i + 1) * 500);
                 return Ok(());
             }
-            debug!("VLC HTTP interface not ready yet, attempt {}/10", i + 1);
+            debug!(
+                "VLC HTTP interface not ready yet, attempt {}/10, process still running",
+                i + 1
+            );
+        }
+
+        // Final check to see if process is still alive
+        if let Some(ref mut proc) = self.vlc_process {
+            if let Ok(Some(status)) = proc.try_wait() {
+                error!(
+                    "VLC process exited during startup with status: {:?}",
+                    status
+                );
+                return Err(anyhow::anyhow!(
+                    "VLC process exited during startup with status: {:?}. Check debug logs for VLC stderr output.", 
+                    status
+                ));
+            }
         }
 
         error!("VLC HTTP interface failed to start after 5 seconds");
         Err(anyhow::anyhow!(
-            "VLC HTTP interface failed to start after 5 seconds"
+            "VLC HTTP interface failed to start after 5 seconds. VLC process appears to be running but HTTP interface is not responding."
         ))
     }
 
@@ -139,7 +211,7 @@ impl VlcPlayer {
             .http_client
             .get(&url)
             .basic_auth("", Some(&self.password))
-            .timeout(Duration::from_secs(2))  // Increased timeout
+            .timeout(Duration::from_secs(2)) // Increased timeout
             .send()
             .await
         {
@@ -151,7 +223,19 @@ impl VlcPlayer {
                 is_success
             }
             Err(e) => {
-                debug!("VLC HTTP interface check failed: {}", e);
+                // Provide more detailed error information
+                if e.is_connect() {
+                    debug!("VLC HTTP interface check failed - connection error: {}. VLC may not be running or HTTP interface not yet ready on port {}", e, self.port);
+                } else if e.is_timeout() {
+                    debug!("VLC HTTP interface check failed - timeout after 2 seconds. VLC may be starting up slowly on port {}", self.port);
+                } else if e.is_request() {
+                    debug!("VLC HTTP interface check failed - request error: {}. Check if VLC is listening on 127.0.0.1:{}", e, self.port);
+                } else {
+                    debug!(
+                        "VLC HTTP interface check failed - unexpected error: {} (port: {})",
+                        e, self.port
+                    );
+                }
                 false
             }
         }
@@ -160,7 +244,7 @@ impl VlcPlayer {
     /// Play or replace current video with new URL
     pub async fn play(&self, video_url: &str) -> Result<()> {
         debug!("Playing video: {}", video_url);
-        
+
         // Check if VLC is still running first
         if !self.is_interface_ready().await {
             warn!("VLC is not running, cannot play video");
@@ -197,7 +281,8 @@ impl VlcPlayer {
         );
 
         debug!("Clearing playlist");
-        let _ = self.http_client
+        let _ = self
+            .http_client
             .get(&clear_url)
             .basic_auth("", Some(&self.password))
             .timeout(Duration::from_secs(2))
@@ -215,7 +300,7 @@ impl VlcPlayer {
         );
 
         debug!("Sending play command to VLC: {}", play_url);
-        
+
         let response = self
             .http_client
             .get(&play_url)
@@ -241,11 +326,11 @@ impl VlcPlayer {
     pub async fn stop(&mut self) -> Result<()> {
         self.stop_with_kill(true).await
     }
-    
+
     /// Stop VLC playback with option to keep process running
     pub async fn stop_with_kill(&mut self, kill_process: bool) -> Result<()> {
         debug!("Stopping VLC playback (kill_process: {})", kill_process);
-        
+
         // Try to stop via HTTP first
         if self.is_interface_ready().await {
             let stop_url = format!(
@@ -259,13 +344,13 @@ impl VlcPlayer {
                 .basic_auth("", Some(&self.password))
                 .send()
                 .await;
-                
+
             // Also clear the playlist to ensure nothing is playing
             let clear_url = format!(
                 "http://127.0.0.1:{}/requests/status.xml?command=pl_empty",
                 self.port
             );
-            
+
             let _ = self
                 .http_client
                 .get(&clear_url)
@@ -289,11 +374,32 @@ impl VlcPlayer {
 
     /// Check if VLC is running
     pub async fn is_running(&mut self) -> bool {
-        // Simply check if the HTTP interface is responding
-        // The process field might be None but VLC could still be running
+        // First check if we have a process handle and if it's still running
+        if let Some(ref mut proc) = self.vlc_process {
+            match proc.try_wait() {
+                Ok(Some(status)) => {
+                    debug!("VLC process has exited with status: {:?}", status);
+                    self.vlc_process = None;
+                    return false;
+                }
+                Ok(None) => {
+                    debug!("VLC process is still running (PID exists)");
+                }
+                Err(e) => {
+                    warn!("Failed to check VLC process status: {}", e);
+                }
+            }
+        } else {
+            debug!("No VLC process handle stored");
+        }
+
+        // Check if the HTTP interface is responding
         let is_ready = self.is_interface_ready().await;
         if !is_ready {
-            debug!("VLC is_running returning false - HTTP interface not ready");
+            debug!("VLC is_running returning false - HTTP interface not ready (process handle exists: {})", 
+                   self.vlc_process.is_some());
+        } else {
+            debug!("VLC is_running returning true - HTTP interface is ready");
         }
         is_ready
     }

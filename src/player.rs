@@ -4,8 +4,10 @@
 use crate::config::PlayerConfig;
 use crate::vlc_player::VlcPlayer;
 use anyhow::{Context, Result};
+use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
+use std::thread;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
@@ -82,19 +84,39 @@ impl Player {
         // Add the URL
         cmd.arg(url);
 
-        // Detach from terminal - redirect stdout/stderr to null for true background execution
-        cmd.stdout(Stdio::null())
-            .stderr(Stdio::null())
+        // Pipe stdout/stderr so we can consume them to prevent blocking
+        cmd.stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .stdin(Stdio::null());
 
-        // Start the process in background and detach
-        cmd.spawn().with_context(|| {
+        // Start the process in background
+        let mut child = cmd.spawn().with_context(|| {
             format!(
                 "Failed to start player in background: {}",
                 self.config.command
             )
         })?;
 
+        // Spawn threads to consume stdout and stderr
+        if let Some(stdout) = child.stdout.take() {
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for _ in reader.lines() {
+                    // Just consume the output, don't process it
+                }
+            });
+        }
+
+        if let Some(stderr) = child.stderr.take() {
+            thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                for _ in reader.lines() {
+                    // Just consume the output, don't process it
+                }
+            });
+        }
+
+        // Let the process run detached
         Ok(())
     }
 
@@ -111,7 +133,7 @@ impl Player {
     /// Play video for TUI mode - runs in background with no terminal output
     pub async fn play_tui(&self, url: &str) -> Result<()> {
         debug!("Playing video in TUI mode: {}", url);
-        
+
         if self.is_vlc() {
             // Use VLC HTTP interface for TUI mode
             let mut vlc_guard = self.vlc_player.lock().await;
@@ -137,7 +159,7 @@ impl Player {
                     debug!("Cleaning up old VLC instance");
                     let _ = old_vlc.stop().await;
                 }
-                
+
                 // Create and launch new instance
                 let mut vlc = VlcPlayer::new(
                     self.config.vlc.http_port,
@@ -150,14 +172,14 @@ impl Player {
                 // VLC is running, just play the new video
                 if let Some(vlc) = vlc_guard.as_ref() {
                     match vlc.play(url).await {
-                        Ok(_) => {},
+                        Ok(_) => {}
                         Err(e) => {
                             error!("Failed to play video: {}", e);
                             // Try to restart VLC
                             warn!("Attempting to restart VLC after play failure");
                             drop(vlc_guard);
                             let mut vlc_guard = self.vlc_player.lock().await;
-                            
+
                             let mut vlc = VlcPlayer::new(
                                 self.config.vlc.http_port,
                                 self.config.vlc.http_password.clone(),
@@ -186,7 +208,7 @@ impl Player {
             let url = url.to_string();
 
             // Spawn the process in a completely detached way
-            let child = tokio::task::spawn_blocking(move || {
+            let mut child = tokio::task::spawn_blocking(move || {
                 let mut cmd = Command::new(&player_cmd);
 
                 // Add configured arguments
@@ -204,9 +226,9 @@ impl Player {
                 // Add the URL
                 cmd.arg(&url);
 
-                // Redirect all output to null to prevent terminal interference
-                cmd.stdout(Stdio::null())
-                    .stderr(Stdio::null())
+                // Pipe stdout/stderr so we can consume them to prevent blocking
+                cmd.stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
                     .stdin(Stdio::null());
 
                 cmd.spawn()
@@ -214,6 +236,25 @@ impl Player {
             .await
             .with_context(|| "Failed to spawn blocking task")?
             .with_context(|| format!("Failed to start player: {}", self.config.command))?;
+
+            // Spawn threads to consume stdout and stderr to prevent blocking
+            if let Some(stdout) = child.stdout.take() {
+                thread::spawn(move || {
+                    let reader = BufReader::new(stdout);
+                    for _ in reader.lines() {
+                        // Just consume the output, don't process it
+                    }
+                });
+            }
+
+            if let Some(stderr) = child.stderr.take() {
+                thread::spawn(move || {
+                    let reader = BufReader::new(stderr);
+                    for _ in reader.lines() {
+                        // Just consume the output, don't process it
+                    }
+                });
+            }
 
             // Store the process handle - minimize lock time
             {
