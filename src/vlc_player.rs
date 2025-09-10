@@ -71,8 +71,9 @@ impl VlcPlayer {
     /// Check if VLC HTTP interface is responding
     async fn is_interface_ready(&self) -> bool {
         let url = format!("http://127.0.0.1:{}/requests/status.xml", self.port);
-        
-        match self.http_client
+
+        match self
+            .http_client
             .get(&url)
             .basic_auth("", Some(&self.password))
             .timeout(Duration::from_secs(1))
@@ -91,8 +92,9 @@ impl VlcPlayer {
             "http://127.0.0.1:{}/requests/status.xml?command=pl_stop",
             self.port
         );
-        
-        let _ = self.http_client
+
+        let _ = self
+            .http_client
             .get(&stop_url)
             .basic_auth("", Some(&self.password))
             .send()
@@ -103,7 +105,7 @@ impl VlcPlayer {
             "http://127.0.0.1:{}/requests/status.xml?command=pl_empty",
             self.port
         );
-        
+
         self.http_client
             .get(&clear_url)
             .basic_auth("", Some(&self.password))
@@ -118,7 +120,8 @@ impl VlcPlayer {
             urlencoding::encode(video_url)
         );
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .get(&play_url)
             .basic_auth("", Some(&self.password))
             .send()
@@ -143,8 +146,9 @@ impl VlcPlayer {
                 "http://127.0.0.1:{}/requests/status.xml?command=pl_stop",
                 self.port
             );
-            
-            let _ = self.http_client
+
+            let _ = self
+                .http_client
                 .get(&stop_url)
                 .basic_auth("", Some(&self.password))
                 .send()
@@ -186,14 +190,14 @@ impl VlcPlayer {
             "http://127.0.0.1:{}/requests/status.xml?command=pl_pause",
             self.port
         );
-        
+
         self.http_client
             .get(&pause_url)
             .basic_auth("", Some(&self.password))
             .send()
             .await
             .context("Failed to pause VLC")?;
-        
+
         Ok(())
     }
 
@@ -204,14 +208,14 @@ impl VlcPlayer {
             "http://127.0.0.1:{}/requests/status.xml?command=volume&val={}",
             self.port, volume
         );
-        
+
         self.http_client
             .get(&volume_url)
             .basic_auth("", Some(&self.password))
             .send()
             .await
             .context("Failed to set VLC volume")?;
-        
+
         Ok(())
     }
 }

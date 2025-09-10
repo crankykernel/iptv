@@ -32,7 +32,7 @@ impl Player {
             vlc_player: Arc::new(Mutex::new(None)),
         }
     }
-    
+
     fn is_vlc(&self) -> bool {
         self.config.command.to_lowercase() == "vlc"
     }
@@ -112,7 +112,7 @@ impl Player {
         if self.is_vlc() {
             // Use VLC HTTP interface for TUI mode
             let mut vlc_guard = self.vlc_player.lock().await;
-            
+
             // Initialize VLC player if needed
             if vlc_guard.is_none() {
                 let mut vlc = VlcPlayer::new(
@@ -122,7 +122,7 @@ impl Player {
                 vlc.launch().await?;
                 *vlc_guard = Some(vlc);
             }
-            
+
             // Play the video using HTTP interface
             if let Some(vlc) = vlc_guard.as_ref() {
                 vlc.play(url).await?;
