@@ -8,6 +8,7 @@ use std::fs::File;
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
+use inquire::Select;
 use iptv::config::ProviderConfig;
 use iptv::xtream_api::{FavouriteStream, XTreamAPI};
 use iptv::{Config, MenuSystem, Player};
@@ -44,6 +45,64 @@ enum Commands {
     Rofi,
     /// Interactively add a new Xtreme API provider to the configuration
     AddProvider,
+    /// Execute raw API calls against the Xtream API
+    Api {
+        /// Provider name to use (if not specified, will prompt)
+        #[arg(short, long, global = true)]
+        provider: Option<String>,
+        #[command(subcommand)]
+        command: ApiCommands,
+    },
+}
+
+#[derive(Subcommand)]
+#[allow(clippy::enum_variant_names)]
+enum ApiCommands {
+    /// Get user account information
+    #[command(name = "get-user-info")]
+    GetUserInfo,
+    /// Get live stream categories
+    #[command(name = "get-live-categories")]
+    GetLiveCategories,
+    /// Get VOD categories
+    #[command(name = "get-vod-categories")]
+    GetVodCategories,
+    /// Get series categories
+    #[command(name = "get-series-categories")]
+    GetSeriesCategories,
+    /// Get live streams
+    #[command(name = "get-live-streams")]
+    GetLiveStreams {
+        /// Optional category ID for filtered results
+        #[arg(short, long)]
+        category: Option<String>,
+    },
+    /// Get VOD streams
+    #[command(name = "get-vod-streams")]
+    GetVodStreams {
+        /// Optional category ID for filtered results
+        #[arg(short, long)]
+        category: Option<String>,
+    },
+    /// Get series list
+    #[command(name = "get-series")]
+    GetSeries {
+        /// Optional category ID for filtered results
+        #[arg(short, long)]
+        category: Option<String>,
+    },
+    /// Get detailed series information
+    #[command(name = "get-series-info")]
+    GetSeriesInfo {
+        /// Series ID
+        id: u32,
+    },
+    /// Get detailed VOD information
+    #[command(name = "get-vod-info")]
+    GetVodInfo {
+        /// VOD ID
+        id: u32,
+    },
 }
 
 async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result<()> {
@@ -231,6 +290,103 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
     Ok(())
 }
 
+async fn run_api_command(
+    providers: Vec<ProviderConfig>,
+    provider_name: Option<String>,
+    command: ApiCommands,
+) -> Result<()> {
+    // Select provider
+    let provider = if let Some(name) = provider_name {
+        // Find provider by name
+        providers
+            .into_iter()
+            .find(|p| p.name.as_ref() == Some(&name))
+            .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", name))?
+    } else if providers.len() == 1 {
+        // Use the only provider
+        providers.into_iter().next().unwrap()
+    } else if providers.is_empty() {
+        anyhow::bail!("No providers configured");
+    } else {
+        // Show selection menu
+        let provider_names: Vec<String> = providers
+            .iter()
+            .map(|p| {
+                p.name
+                    .clone()
+                    .unwrap_or_else(|| format!("{}@{}", p.username, p.url))
+            })
+            .collect();
+
+        let selection = Select::new("Select provider:", provider_names).prompt()?;
+
+        providers
+            .into_iter()
+            .find(|p| {
+                let name = p
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("{}@{}", p.username, p.url));
+                name == selection
+            })
+            .unwrap()
+    };
+
+    // Create API client
+    let mut api = XTreamAPI::new(
+        provider.url.clone(),
+        provider.username.clone(),
+        provider.password.clone(),
+        provider.name.clone(),
+    )?;
+
+    // Execute the API call
+    let result = match command {
+        ApiCommands::GetUserInfo => {
+            let info = api.get_user_info().await?;
+            serde_json::to_value(info)?
+        }
+        ApiCommands::GetLiveCategories => {
+            let categories = api.get_live_categories().await?;
+            serde_json::to_value(categories)?
+        }
+        ApiCommands::GetVodCategories => {
+            let categories = api.get_vod_categories().await?;
+            serde_json::to_value(categories)?
+        }
+        ApiCommands::GetSeriesCategories => {
+            let categories = api.get_series_categories().await?;
+            serde_json::to_value(categories)?
+        }
+        ApiCommands::GetLiveStreams { category } => {
+            let streams = api.get_live_streams(category.as_deref()).await?;
+            serde_json::to_value(streams)?
+        }
+        ApiCommands::GetVodStreams { category } => {
+            let streams = api.get_vod_streams(category.as_deref()).await?;
+            serde_json::to_value(streams)?
+        }
+        ApiCommands::GetSeries { category } => {
+            let series = api.get_series(category.as_deref()).await?;
+            serde_json::to_value(series)?
+        }
+        ApiCommands::GetSeriesInfo { id } => {
+            let info = api.get_series_info(id).await?;
+            serde_json::to_value(info)?
+        }
+        ApiCommands::GetVodInfo { id } => {
+            let info = api.get_vod_info(id).await?;
+            serde_json::to_value(info)?
+        }
+    };
+
+    // Pretty print the JSON result
+    let pretty_json = serde_json::to_string_pretty(&result)?;
+    println!("{}", pretty_json);
+
+    Ok(())
+}
+
 async fn add_provider_interactively(config_path: PathBuf) -> Result<()> {
     println!("Adding a new Xtreme API provider to your configuration");
     println!("Please provide the following information:");
@@ -395,6 +551,9 @@ async fn main() -> Result<()> {
         }
         Some(Commands::AddProvider) => {
             add_provider_interactively(config_path).await?;
+        }
+        Some(Commands::Api { provider, command }) => {
+            run_api_command(config.providers, provider, command).await?;
         }
         None => {
             // Check if TUI mode is requested
