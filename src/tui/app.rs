@@ -240,7 +240,11 @@ impl App {
                     self.add_log("Log panel: side view".to_string());
                     return None;
                 }
-                _ => {}
+                _ => {
+                    // Consume all other keys in full log mode to prevent them from 
+                    // triggering actions in the underlying screens
+                    return None;
+                }
             }
         }
 
