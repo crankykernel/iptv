@@ -890,7 +890,68 @@ impl MenuSystem {
             return Ok(());
         }
 
-        let series_options: Vec<String> = series.iter().map(|s| s.name.clone()).collect();
+        // Create display options and mapping
+        let (series_options, series_map): (Vec<String>, Vec<crate::xtream_api::SeriesInfo>) =
+            if category_id.is_none() {
+                // For "All" category, deduplicate and show categories
+                let categories = {
+                    let api = self
+                        .current_api
+                        .as_mut()
+                        .ok_or_else(|| anyhow::anyhow!("No provider connected"))?;
+                    api.get_series_categories().await?
+                };
+
+                let category_map: HashMap<String, String> = categories
+                    .into_iter()
+                    .map(|cat| (cat.category_id, cat.category_name))
+                    .collect();
+
+                // Group series by series_id to collect all categories
+                let mut series_dedup_map: HashMap<
+                    u32,
+                    (crate::xtream_api::SeriesInfo, Vec<String>),
+                > = HashMap::new();
+
+                for info in series {
+                    let category_name = info
+                        .category_id
+                        .as_ref()
+                        .and_then(|id| category_map.get(id))
+                        .cloned()
+                        .unwrap_or_else(|| "Unknown".to_string());
+
+                    series_dedup_map
+                        .entry(info.series_id)
+                        .and_modify(|(_, categories)| {
+                            if !categories.contains(&category_name) {
+                                categories.push(category_name.clone());
+                            }
+                        })
+                        .or_insert((info, vec![category_name]));
+                }
+
+                // Convert to display format
+                let mut display_items: Vec<(String, crate::xtream_api::SeriesInfo)> =
+                    series_dedup_map
+                        .into_iter()
+                        .map(|(_, (info, categories))| {
+                            let categories_str = categories.join(", ");
+                            let display_name = format!("{} [{}]", info.name, categories_str);
+                            (display_name, info)
+                        })
+                        .collect();
+
+                // Sort by display name
+                display_items.sort_by(|a, b| a.0.cmp(&b.0));
+
+                // Split into options and series list
+                display_items.into_iter().unzip()
+            } else {
+                // For specific category, no deduplication needed
+                let options: Vec<String> = series.iter().map(|s| s.name.clone()).collect();
+                (options, series)
+            };
 
         let mut last_selected_index = 0;
 
@@ -912,7 +973,7 @@ impl MenuSystem {
                 // Remember this selection for next time
                 last_selected_index = selected_index;
 
-                let selected_series = &series[selected_index];
+                let selected_series = &series_map[selected_index];
 
                 // Fetch detailed series information with episodes
                 println!("Loading episodes for: {}", selected_series.name);

@@ -1194,30 +1194,99 @@ impl App {
             let result = match content_type {
                 ContentType::Live => api.get_live_streams(category_id).await,
                 ContentType::Movies => api.get_vod_streams(category_id).await,
-                ContentType::Series => api.get_series(category_id).await.map(|series_infos| {
-                    series_infos
-                        .into_iter()
-                        .map(|info| Stream {
-                            num: info.num,
-                            name: info.name.clone(),
-                            stream_type: "series".to_string(),
-                            stream_id: info.series_id,
-                            stream_icon: info.cover.clone(),
-                            epg_channel_id: None,
-                            added: None,
-                            category_id: info.category_id.clone(),
-                            category_ids: None,
-                            custom_sid: None,
-                            tv_archive: None,
-                            direct_source: None,
-                            tv_archive_duration: None,
-                            is_adult: None,
-                            container_extension: None,
-                            rating: None,
-                            rating_5based: None,
+                ContentType::Series => {
+                    // Fetch series
+                    let series_result = api.get_series(category_id).await;
+
+                    // If this is the "All" category, deduplicate and show categories
+                    if category_id.is_none() {
+                        // First get all categories to map category IDs to names
+                        let categories = api.get_series_categories().await.unwrap_or_default();
+                        let category_map: std::collections::HashMap<String, String> = categories
+                            .into_iter()
+                            .map(|c| (c.category_id, c.category_name))
+                            .collect();
+
+                        series_result.map(|series_infos| {
+                            // Group series by series_id to collect all categories
+                            let mut series_map: std::collections::HashMap<
+                                u32,
+                                (crate::xtream_api::SeriesInfo, Vec<String>),
+                            > = std::collections::HashMap::new();
+
+                            for info in series_infos {
+                                let category_name = info
+                                    .category_id
+                                    .as_ref()
+                                    .and_then(|id| category_map.get(id))
+                                    .cloned()
+                                    .unwrap_or_else(|| "Unknown".to_string());
+
+                                series_map
+                                    .entry(info.series_id)
+                                    .and_modify(|(_, categories)| {
+                                        if !categories.contains(&category_name) {
+                                            categories.push(category_name.clone());
+                                        }
+                                    })
+                                    .or_insert((info, vec![category_name]));
+                            }
+
+                            // Convert back to Stream objects with category info in the name
+                            series_map
+                                .into_iter()
+                                .map(|(_, (info, categories))| {
+                                    let categories_str = categories.join(", ");
+                                    Stream {
+                                        num: info.num,
+                                        name: format!("{} [{}]", info.name, categories_str),
+                                        stream_type: "series".to_string(),
+                                        stream_id: info.series_id,
+                                        stream_icon: info.cover.clone(),
+                                        epg_channel_id: None,
+                                        added: None,
+                                        category_id: info.category_id.clone(),
+                                        category_ids: None,
+                                        custom_sid: None,
+                                        tv_archive: None,
+                                        direct_source: None,
+                                        tv_archive_duration: None,
+                                        is_adult: None,
+                                        container_extension: None,
+                                        rating: None,
+                                        rating_5based: None,
+                                    }
+                                })
+                                .collect()
                         })
-                        .collect()
-                }),
+                    } else {
+                        // Normal processing for specific category
+                        series_result.map(|series_infos| {
+                            series_infos
+                                .into_iter()
+                                .map(|info| Stream {
+                                    num: info.num,
+                                    name: info.name.clone(),
+                                    stream_type: "series".to_string(),
+                                    stream_id: info.series_id,
+                                    stream_icon: info.cover.clone(),
+                                    epg_channel_id: None,
+                                    added: None,
+                                    category_id: info.category_id.clone(),
+                                    category_ids: None,
+                                    custom_sid: None,
+                                    tv_archive: None,
+                                    direct_source: None,
+                                    tv_archive_duration: None,
+                                    is_adult: None,
+                                    container_extension: None,
+                                    rating: None,
+                                    rating_5based: None,
+                                })
+                                .collect()
+                        })
+                    }
+                }
             };
 
             match result {
