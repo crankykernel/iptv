@@ -17,8 +17,8 @@ A modern, terminal-based IPTV streaming client with Xtreme API support. Features
 
 ### 🎛️ Interface Options
 - **TUI Mode**: Full-featured terminal user interface with keyboard navigation
-- **CLI Mode**: Interactive menu system for quick access
-- **Rofi Integration**: External launcher support for desktop environments
+- **CLI Mode**: Scriptable command-line interface for automation
+- **API Mode**: Direct access to Xtream API calls for advanced users
 
 ### ⭐ Smart Features
 - **Favourites Management**: Save and organize your favorite content
@@ -36,18 +36,37 @@ A modern, terminal-based IPTV streaming client with Xtreme API support. Features
 ## Prerequisites
 
 ### Required Dependencies
-- **Rust**: Version 1.88.0 or later (MSRV)
+- **Rust**: Version 1.80.0 or later
 - **MPV Player**: Required for video playback
+  ```bash
+  # Ubuntu/Debian
+  sudo apt install mpv
+  
+  # Fedora
+  sudo dnf install mpv
+  
+  # Arch
+  sudo pacman -S mpv
+  ```
 
 ### System Requirements
-- Linux with terminal support
+- Linux/macOS/Windows (Linux recommended)
+- Terminal with UTF-8 support
 - Internet connection for IPTV streaming
 
 ## Installation
 
-### Using Cargo Install
+### From Source
 ```bash
-cargo install --git https://github.com/your-username/iptv
+# Clone the repository
+git clone https://github.com/your-username/iptv
+cd iptv
+
+# Build and install
+cargo build --release
+
+# Optional: Install to PATH
+cargo install --path .
 ```
 
 ## Configuration
@@ -101,22 +120,43 @@ password = "password2"
 page_size = 20  # Items per page in menus
 ```
 
+### Environment Variables
+
+```bash
+# Set default provider for CLI commands
+export IPTV_PROVIDER="My IPTV Service"
+
+# Enable debug logging
+export RUST_LOG=debug
+```
+
 ### Interactive Provider Setup
 
-You can also add providers interactively:
+You can add providers interactively:
 ```bash
-./iptv add-provider
+# Add a new provider
+./iptv cli add-provider
+
+# List configured providers
+./iptv cli providers list
+
+# Test provider connection
+./iptv cli providers test <provider_name>
 ```
 
 This will prompt you for provider details and automatically update your configuration.
 
 ## Usage
 
-### TUI Mode (Recommended)
+### TUI Mode (Default)
 
 Launch the full terminal user interface:
 ```bash
-./iptv --tui
+# Default mode - launches TUI
+./iptv
+
+# Or explicitly
+./iptv tui
 ```
 
 **TUI Keyboard Shortcuts:**
@@ -129,34 +169,61 @@ Launch the full terminal user interface:
 | `PgDn` | Page down (10 items) |
 | `Home` | Jump to first item |
 | `End` | Jump to last item |
-| `Enter` | Select item |
+| `Enter` | Select item / Play stream |
+| `d` | Play in detached window (streams/episodes) |
 | `Esc`/`b` | Go back |
 | `q` | Quit application |
 | `/` | Fuzzy search/filter |
 | `f` | Toggle favourite |
 | `s` | Stop playback |
 | `?`/`F1` | Toggle help |
-| `Space` | Scroll down (in movie info) |
-| `Shift+Space` | Scroll up (in movie info) |
+| `Space` | Scroll down (in VOD info) |
+| `Shift+Space` | Scroll up (in VOD info) |
 | `Ctrl+C` | Force quit |
 
 ### CLI Mode
 
-Launch the interactive command-line interface:
+Scriptable command-line interface for automation:
 ```bash
-./iptv
+# Search for content
+./iptv cli search "movie name" --type movie
+./iptv cli search "news" --type live
+
+# List content
+./iptv cli list live              # List all live streams
+./iptv cli list movie             # List all movies
+./iptv cli list series            # List all TV series
+
+# Play content by ID
+./iptv cli play 12345 --type live
+./iptv cli play 67890 --type movie --detached  # Play in detached window
+
+# Manage favorites
+./iptv cli fav list
+./iptv cli fav add 12345 --type live "Channel Name"
+./iptv cli fav remove 12345
+
+# Get stream URL (for external players)
+./iptv cli url 12345 --type live
+
+# Output in different formats
+./iptv cli list live --format json
+./iptv cli search "sports" --format m3u
 ```
 
-Navigate through menus using number selections and follow the prompts.
+### API Mode
 
-### Rofi Integration
-
-For desktop environments, launch favourites in Rofi:
+Direct access to Xtream API for advanced usage:
 ```bash
-./iptv rofi
-```
+# Get user information
+./iptv api user-info
 
-This creates a searchable list of all your favourites across all providers.
+# List live categories
+./iptv api live-categories
+
+# Get VOD information
+./iptv api vod-info --id <vod_id>
+```
 
 ## Command Line Options
 
@@ -165,17 +232,37 @@ USAGE:
     iptv [OPTIONS] [COMMAND]
 
 OPTIONS:
-    -c, --config <FILE>    Configuration file path
-    -v, --verbose          Enable verbose (debug) logging
-        --tui             Use TUI (Terminal User Interface) mode
-        --debug-log       Enable debug logging to file (iptv_debug.log)
-    -h, --help            Print help information
-    -V, --version         Print version information
+    -v, --verbose     Enable verbose (debug) logging
+        --debug-log   Enable debug logging to file (iptv_debug.log)
+    -h, --help        Print help information
+    -V, --version     Print version information
 
 COMMANDS:
-    rofi            Launch rofi menu with favourites
-    add-provider    Interactively add a new Xtreme API provider
-    help            Print this message or the help of the given subcommand(s)
+    tui    Launch interactive TUI (default if no command given)
+    cli    Command-line interface for scriptable operations
+    api    Execute raw API calls
+    help   Print this message or the help of the given subcommand(s)
+```
+
+### CLI Subcommands
+
+```
+USAGE:
+    iptv cli [OPTIONS] <COMMAND>
+
+COMMANDS:
+    play          Play stream/movie/episode by ID
+    search        Search content across providers
+    list          List streams/movies/series
+    info          Get detailed information about content
+    url           Get stream URL
+    fav           Manage favorites
+    cache         Manage cache
+    providers     Manage providers
+    add-provider  Interactively add a new provider
+
+OPTIONS:
+    -p, --provider <PROVIDER>  Provider name to use (or set IPTV_PROVIDER env var)
 ```
 
 ## Features in Detail
@@ -190,7 +277,14 @@ COMMANDS:
 - Automatic caching of API responses for faster navigation
 - Cache is stored in the user's cache directory
 - Intelligent cache invalidation ensures fresh content
-- Manual refresh available with `r` key
+- Manual cache management via CLI:
+  ```bash
+  # Clear cache for a provider
+  ./iptv cli cache clear <provider_name>
+  
+  # Refresh cache
+  ./iptv cli cache refresh <provider_name>
+  ```
 
 ### Search and Filtering
 - Press `/` to activate fuzzy search in any list
