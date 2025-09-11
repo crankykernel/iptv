@@ -88,6 +88,7 @@ pub enum Action {
     Back,
     Select,
     Refresh,
+    CacheRefresh, // Exit TUI temporarily to refresh cache
 }
 
 pub struct App {
@@ -131,6 +132,20 @@ pub struct App {
 }
 
 impl App {
+    /// Get the current provider name if available
+    pub fn get_current_provider_name(&self) -> Option<String> {
+        // Get the provider name from the provider config that was used to create the API
+        if self.current_api.is_some() && !self.providers.is_empty() {
+            // If we have a single provider, use it
+            if self.providers.len() == 1 {
+                return self.providers[0].name.clone();
+            }
+            // Otherwise, we need to track which provider was selected
+            // For now, just return None - this would need additional state tracking
+        }
+        None
+    }
+
     pub fn new(providers: Vec<ProviderConfig>, player: Player) -> Self {
         let items = if providers.len() > 1 {
             let mut items = vec!["All Favourites".to_string()];
@@ -388,7 +403,9 @@ impl App {
                 KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Enter => {
                     self.save_current_navigation_state();
-                    self.handle_main_menu_selection().await;
+                    if let Some(action) = self.handle_main_menu_selection().await {
+                        return Some(action);
+                    }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
                     if self.providers.len() > 1 {
@@ -1147,20 +1164,30 @@ impl App {
             "Movies (VOD)".to_string(),
             "TV Series".to_string(),
             "Refresh Cache".to_string(),
-            "Clear Cache".to_string(),
         ];
         self.reset_filter();
     }
 
-    async fn handle_main_menu_selection(&mut self) {
+    async fn handle_main_menu_selection(&mut self) -> Option<Action> {
         match self.selected_index {
-            0 => self.load_favourites().await,
-            1 => self.load_categories(ContentType::Live).await,
-            2 => self.load_categories(ContentType::Movies).await,
-            3 => self.load_categories(ContentType::Series).await,
+            0 => {
+                self.load_favourites().await;
+                None
+            }
+            1 => {
+                self.load_categories(ContentType::Live).await;
+                None
+            }
+            2 => {
+                self.load_categories(ContentType::Movies).await;
+                None
+            }
+            3 => {
+                self.load_categories(ContentType::Series).await;
+                None
+            }
             4 => self.refresh_cache().await,
-            5 => self.clear_cache().await,
-            _ => {}
+            _ => None,
         }
     }
 
@@ -2173,27 +2200,9 @@ impl App {
         self.add_log("Stopped playback".to_string());
     }
 
-    async fn refresh_cache(&mut self) {
-        let provider_hash = if let Some(api) = &self.current_api {
-            api.provider_hash.clone()
-        } else {
-            return;
-        };
-
-        self.state = AppState::Loading("Refreshing cache...".to_string());
-        self.add_log("Refreshing cache".to_string());
-
-        if let Some(api) = &self.current_api {
-            if let Err(e) = api.cache_manager.clear_provider_cache(&provider_hash).await {
-                self.state = AppState::Error(format!("Failed to refresh cache: {}", e));
-                self.add_log(format!("Cache refresh failed: {}", e));
-            } else {
-                self.state = AppState::MainMenu;
-                self.restore_navigation_state(&AppState::MainMenu);
-                self.update_main_menu_items();
-                self.add_log("Cache refreshed successfully".to_string());
-            }
-        }
+    async fn refresh_cache(&mut self) -> Option<Action> {
+        // Return a special action to exit TUI and run cache refresh
+        Some(Action::CacheRefresh)
     }
 
     fn start_search(&mut self) {
@@ -2266,21 +2275,10 @@ impl App {
         };
     }
 
-    async fn clear_cache(&mut self) {
-        self.state = AppState::Loading("Clearing cache...".to_string());
-        self.add_log("Clearing all cache".to_string());
-
-        if let Some(api) = &self.current_api {
-            if let Err(e) = api.cache_manager.clear_all_cache().await {
-                self.state = AppState::Error(format!("Failed to clear cache: {}", e));
-                self.add_log(format!("Cache clear failed: {}", e));
-            } else {
-                self.state = AppState::MainMenu;
-                self.restore_navigation_state(&AppState::MainMenu);
-                self.update_main_menu_items();
-                self.add_log("Cache cleared successfully".to_string());
-            }
-        }
+    /// Clear internal TUI caches
+    pub fn clear_internal_caches(&mut self) {
+        self.cached_categories.clear();
+        self.cached_streams.clear();
     }
 
     fn add_log(&mut self, message: String) {

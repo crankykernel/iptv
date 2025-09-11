@@ -90,10 +90,53 @@ async fn run_app(tui: &mut Tui, app: &mut App) -> Result<()> {
 
         let should_redraw = match event {
             Ok(Ok(Event::Key(key_event))) => {
-                if let Some(app::Action::Quit) = app.handle_key_event(key_event).await {
-                    break;
+                match app.handle_key_event(key_event).await {
+                    Some(app::Action::Quit) => break,
+                    Some(app::Action::CacheRefresh) => {
+                        // Exit TUI temporarily to run cache refresh
+                        tui.exit()?;
+
+                        // Get provider name before mutable borrow
+                        let provider_name = app
+                            .get_current_provider_name()
+                            .unwrap_or_else(|| "Unknown".to_string());
+
+                        // Run the same cache refresh as CLI with progress enabled
+                        if let Some(api) = &mut app.current_api {
+                            // Enable progress bars for the refresh operation
+                            api.enable_progress();
+
+                            // This is the exact same call the CLI makes
+                            match api.refresh_cache().await {
+                                Ok(_) => {
+                                    println!("\n✓ Cache refreshed for {}", provider_name);
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "\nWarning: Failed to refresh cache for {}: {}",
+                                        provider_name, e
+                                    );
+                                }
+                            }
+
+                            // Disable progress bars again for TUI mode
+                            api.disable_progress();
+                        }
+
+                        // Clear local TUI caches
+                        app.clear_internal_caches();
+
+                        // Wait for user to continue
+                        println!("\nPress Enter to return to the TUI...");
+                        let mut input = String::new();
+                        std::io::stdin().read_line(&mut input)?;
+
+                        // Re-initialize TUI
+                        tui.init()?;
+                        true // Redraw after returning
+                    }
+                    _ => true, // Always redraw after key events
                 }
-                true // Always redraw after key events
             }
             Ok(Ok(Event::Resize(_, _))) => true, // Redraw on resize
             Ok(Ok(Event::Mouse(_))) => false,    // Don't redraw on mouse events we don't handle

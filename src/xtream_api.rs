@@ -501,6 +501,11 @@ impl XTreamAPI {
         self.show_progress = false;
     }
 
+    pub fn enable_progress(&mut self) {
+        self.show_progress = true;
+        self.logger = None; // Clear any logger to allow progress bars
+    }
+
     async fn make_request<T>(&self, action: &str, category_id: Option<&str>) -> Result<T>
     where
         T: for<'de> Deserialize<'de>,
