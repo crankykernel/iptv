@@ -286,12 +286,23 @@ impl App {
             return None;
         }
 
+        // If help is shown, any key closes it (except for the help toggle keys)
+        if self.show_help {
+            if key.code == KeyCode::Char('?') || key.code == KeyCode::F(1) {
+                self.show_help = false;
+            } else {
+                // Any other key just closes the help
+                self.show_help = false;
+            }
+            return None;
+        }
+
         if key.code == KeyCode::Char('q') {
             return Some(Action::Quit);
         }
 
         if key.code == KeyCode::Char('?') || key.code == KeyCode::F(1) {
-            self.show_help = !self.show_help;
+            self.show_help = true;
             return None;
         }
 
@@ -424,6 +435,20 @@ impl App {
                         }
                     }
                 }
+                KeyCode::Char('d') => {
+                    // Play in detached window (for live streams only)
+                    if self.selected_index < self.streams.len() {
+                        let stream = self.streams[self.selected_index].clone();
+                        match content_type {
+                            ContentType::Live => {
+                                self.play_stream_detached(&stream).await;
+                            }
+                            _ => {
+                                // For series and movies, 'd' doesn't apply at this level
+                            }
+                        }
+                    }
+                }
                 KeyCode::Esc | KeyCode::Char('b') => {
                     // Go back to category selection and reload categories
                     self.load_categories(content_type.clone()).await;
@@ -439,6 +464,7 @@ impl App {
                         .enumerate()
                         .filter(|(_, item)| {
                             item.contains("Play Movie")
+                                || item.contains("Play in Detached")
                                 || item.contains("Copy URL")
                                 || item.contains("Back")
                         })
@@ -466,6 +492,7 @@ impl App {
                         .enumerate()
                         .filter(|(_, item)| {
                             item.contains("Play Movie")
+                                || item.contains("Play in Detached")
                                 || item.contains("Copy URL")
                                 || item.contains("Back")
                         })
@@ -546,8 +573,11 @@ impl App {
                     // Always execute selected menu action
                     let selected_item = &self.items[self.selected_index];
 
-                    if selected_item.contains("Play Movie") {
+                    if selected_item.contains("Play Movie") && !selected_item.contains("Detached") {
                         self.play_vod_stream(&vod_state.stream.clone()).await;
+                    } else if selected_item.contains("Play in Detached Window") {
+                        self.play_vod_stream_detached(&vod_state.stream.clone())
+                            .await;
                     } else if selected_item.contains("Copy URL") {
                         if let Some(api) = &self.current_api {
                             let extension = self
@@ -685,6 +715,13 @@ impl App {
                     if self.selected_index < self.episodes.len() {
                         let episode = self.episodes[self.selected_index].clone();
                         self.play_episode(&episode).await;
+                    }
+                }
+                KeyCode::Char('d') => {
+                    // Play episode in detached window
+                    if self.selected_index < self.episodes.len() {
+                        let episode = self.episodes[self.selected_index].clone();
+                        self.play_episode_detached(&episode).await;
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
@@ -834,6 +871,13 @@ impl App {
                     if self.selected_index < self.favourites.len() {
                         let fav = self.favourites[self.selected_index].clone();
                         self.play_favourite(&fav).await;
+                    }
+                }
+                KeyCode::Char('d') => {
+                    // Play favourite in detached window
+                    if self.selected_index < self.favourites.len() {
+                        let fav = self.favourites[self.selected_index].clone();
+                        self.play_favourite_detached(&fav).await;
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
@@ -1627,6 +1671,34 @@ impl App {
         }
     }
 
+    async fn play_stream_detached(&mut self, stream: &Stream) {
+        self.add_log(format!("Playing in detached window: {}", stream.name));
+
+        if let Some(api) = &self.current_api {
+            let url = api.get_stream_url(
+                stream.stream_id,
+                if stream.stream_type == "live" {
+                    "live"
+                } else {
+                    "movie"
+                },
+                stream.container_extension.as_deref(),
+            );
+
+            // Log the stream URL to the logs panel
+            self.add_log(format!("Stream URL: {}", url));
+
+            // Use disassociated play method for fully independent window
+            if let Err(e) = self.player.play_disassociated(&url).await {
+                self.state = AppState::Error(format!("Failed to play stream: {}", e));
+                self.add_log(format!("Playback failed: {}", e));
+            } else {
+                self.add_log("Stream started in new independent window".to_string());
+                self.add_log("This window won't be affected by other playback".to_string());
+            }
+        }
+    }
+
     async fn play_episode(&mut self, episode: &ApiEpisode) {
         // Store the current state to return to after starting playback
         let return_state = self.state.clone();
@@ -1656,6 +1728,30 @@ impl App {
         }
     }
 
+    async fn play_episode_detached(&mut self, episode: &ApiEpisode) {
+        self.add_log(format!("Playing in detached window: {}", episode.title));
+
+        if let Some(api) = &self.current_api {
+            let url = api.get_stream_url(
+                episode.id.parse().unwrap_or(0),
+                "series",
+                episode.container_extension.as_deref(),
+            );
+
+            // Log the stream URL to the logs panel
+            self.add_log(format!("Stream URL: {}", url));
+
+            // Use disassociated play method for fully independent window
+            if let Err(e) = self.player.play_disassociated(&url).await {
+                self.state = AppState::Error(format!("Failed to play episode: {}", e));
+                self.add_log(format!("Playback failed: {}", e));
+            } else {
+                self.add_log("Episode started in new independent window".to_string());
+                self.add_log("This window won't be affected by other playback".to_string());
+            }
+        }
+    }
+
     async fn play_favourite(&mut self, fav: &FavouriteStream) {
         // Store the current state to return to after starting playback
         let return_state = self.state.clone();
@@ -1675,6 +1771,30 @@ impl App {
                 self.add_log("Continue browsing while video plays".to_string());
                 // Return to the previous state so user can continue browsing
                 self.state = return_state;
+            }
+        }
+    }
+
+    async fn play_favourite_detached(&mut self, fav: &FavouriteStream) {
+        self.add_log(format!(
+            "Playing favourite in detached window: {}",
+            fav.name
+        ));
+
+        if let Some(api) = &self.current_api {
+            // Construct the stream URL from the favourite stream ID
+            let url = api.get_stream_url(fav.stream_id, &fav.stream_type, None);
+
+            // Log the stream URL
+            self.add_log(format!("Stream URL: {}", url));
+
+            // Use disassociated play method for fully independent window
+            if let Err(e) = self.player.play_disassociated(&url).await {
+                self.state = AppState::Error(format!("Failed to play favourite: {}", e));
+                self.add_log(format!("Playback failed: {}", e));
+            } else {
+                self.add_log("Favourite started in new independent window".to_string());
+                self.add_log("This window won't be affected by other playback".to_string());
             }
         }
     }
@@ -1825,6 +1945,7 @@ impl App {
                 items.push("Actions:".to_string());
                 items.push(String::new());
                 items.push("  > Play Movie".to_string());
+                items.push("  > Play in Detached Window".to_string());
                 items.push("  > Copy URL to Logs".to_string());
                 items.push("  > Back to Movies".to_string());
 
@@ -1889,6 +2010,32 @@ impl App {
                 self.add_log("Continue browsing while video plays".to_string());
                 // Return to the VOD info state so user can see the info
                 self.state = return_state;
+            }
+        }
+    }
+
+    async fn play_vod_stream_detached(&mut self, stream: &Stream) {
+        self.add_log(format!("Playing in detached window: {}", stream.name));
+
+        if let Some(api) = &self.current_api {
+            // Use the container extension from VOD info if available
+            let extension = self
+                .vod_info
+                .as_ref()
+                .map(|info| info.movie_data.container_extension.as_str());
+
+            let url = api.get_stream_url(stream.stream_id, "movie", extension);
+
+            // Log the stream URL
+            self.add_log(format!("Stream URL: {}", url));
+
+            // Use disassociated play method for fully independent window
+            if let Err(e) = self.player.play_disassociated(&url).await {
+                self.state = AppState::Error(format!("Failed to play movie: {}", e));
+                self.add_log(format!("Playback failed: {}", e));
+            } else {
+                self.add_log("Movie started in new independent window".to_string());
+                self.add_log("This window won't be affected by other playback".to_string());
             }
         }
     }
