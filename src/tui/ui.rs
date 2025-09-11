@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
-use super::app::{App, AppState};
+use super::app::{App, AppState, LogDisplayMode};
 use super::widgets::{centered_rect, create_help_widget};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -80,24 +80,31 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_content(frame: &mut Frame, app: &mut App, area: Rect) {
-    if app.show_logs {
-        // Split content area into main panel and side panel
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Min(50),    // Main content
-                Constraint::Length(40), // Side panel (logs/info)
-            ])
-            .split(area);
+    match app.log_display_mode {
+        LogDisplayMode::Side => {
+            // Split content area into main panel and side panel
+            let chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Min(50),    // Main content
+                    Constraint::Length(40), // Side panel (logs/info)
+                ])
+                .split(area);
 
-        // Draw main content list
-        draw_main_list(frame, app, chunks[0]);
+            // Draw main content list
+            draw_main_list(frame, app, chunks[0]);
 
-        // Draw side panel with logs and info
-        draw_side_panel(frame, app, chunks[1]);
-    } else {
-        // Use full width for main content when logs are hidden
-        draw_main_list(frame, app, area);
+            // Draw side panel with logs and info
+            draw_side_panel(frame, app, chunks[1]);
+        }
+        LogDisplayMode::None => {
+            // Use full width for main content when logs are hidden
+            draw_main_list(frame, app, area);
+        }
+        LogDisplayMode::Full => {
+            // Draw logs in full window with scrolling
+            draw_full_window_logs(frame, app, area);
+        }
     }
 }
 
@@ -233,22 +240,102 @@ fn draw_logs_panel(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(logs, inner_area);
 }
 
+fn draw_full_window_logs(frame: &mut Frame, app: &mut App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Logs (Full View) - Press ESC to return ");
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    if app.logs.is_empty() {
+        let empty_msg = Paragraph::new("No logs to display")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Gray));
+        frame.render_widget(empty_msg, inner_area);
+        return;
+    }
+
+    // Calculate visible range based on scroll position
+    let visible_count = inner_area.height as usize;
+    
+    // Adjust scroll offset to keep selected line visible
+    if app.log_selected_index >= app.log_scroll_offset + visible_count {
+        app.log_scroll_offset = app.log_selected_index.saturating_sub(visible_count - 1);
+    }
+    
+    let end_idx = (app.log_scroll_offset + visible_count).min(app.logs.len());
+    
+    // Create log items with highlighting for selected line
+    let log_items: Vec<ListItem> = app.logs[app.log_scroll_offset..end_idx]
+        .iter()
+        .enumerate()
+        .map(|(idx, (_, msg))| {
+            let actual_idx = app.log_scroll_offset + idx;
+            let style = if actual_idx == app.log_selected_index {
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            ListItem::new(msg.clone()).style(style)
+        })
+        .collect();
+
+    let logs_list = List::new(log_items);
+    frame.render_widget(logs_list, inner_area);
+
+    // Draw scrollbar indicator if there are more logs than visible
+    if app.logs.len() > visible_count {
+        let scrollbar_info = format!(
+            " [{}/{}] ",
+            app.log_selected_index + 1,
+            app.logs.len()
+        );
+        let scrollbar_area = Rect {
+            x: area.x + area.width - scrollbar_info.len() as u16 - 1,
+            y: area.y,
+            width: scrollbar_info.len() as u16,
+            height: 1,
+        };
+        frame.render_widget(
+            Paragraph::new(scrollbar_info)
+                .style(Style::default().fg(Color::Yellow)),
+            scrollbar_area,
+        );
+    }
+}
+
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let footer_text = if let Some(msg) = &app.status_message {
         msg.clone()
     } else {
-        match &app.state {
-            AppState::VodInfo(_) => {
-                format!(
-                    " ↑↓: Menu | PgUp/PgDn/Space/Shift+Space: Scroll | Enter: Select | Esc/b: Back | Ctrl+.: {} Logs | ?: Help ",
-                    if app.show_logs { "Hide" } else { "Show" }
-                )
-            }
-            _ => {
-                format!(
-                    " ↑↓/jk: Navigate | Enter: Select | Esc/b: Back | Ctrl+.: {} Logs | ?: Help | q: Quit ",
-                    if app.show_logs { "Hide" } else { "Show" }
-                )
+        // Special footer for full log view
+        if matches!(app.log_display_mode, LogDisplayMode::Full) {
+            " ↑↓/jk: Navigate | PgUp/PgDn: Page | Home/End: Jump | Esc: Return | Ctrl+.: Toggle Mode ".to_string()
+        } else {
+            let log_mode_text = match app.log_display_mode {
+                LogDisplayMode::Side => "Logs→Full",
+                LogDisplayMode::None => "Show Logs",
+                LogDisplayMode::Full => "Hide Logs", // This shouldn't be reached but included for completeness
+            };
+            
+            match &app.state {
+                AppState::VodInfo(_) => {
+                    format!(
+                        " ↑↓: Menu | PgUp/PgDn/Space/Shift+Space: Scroll | Enter: Select | Esc/b: Back | Ctrl+.: {} | ?: Help ",
+                        log_mode_text
+                    )
+                }
+                _ => {
+                    format!(
+                        " ↑↓/jk: Navigate | Enter: Select | Esc/b: Back | Ctrl+.: {} | ?: Help | q: Quit ",
+                        log_mode_text
+                    )
+                }
             }
         }
     };

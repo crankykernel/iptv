@@ -12,6 +12,13 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
+pub enum LogDisplayMode {
+    Side,
+    None,
+    Full,
+}
+
+#[derive(Debug, Clone)]
 pub struct TuiSeason {
     pub season_number: u32,
     pub name: String,
@@ -65,7 +72,9 @@ pub struct App {
     pub progress: Option<(f64, String)>,
     pub logs: Vec<(Instant, String)>,
     pub show_help: bool,
-    pub show_logs: bool,
+    pub log_display_mode: LogDisplayMode,
+    pub log_selected_index: usize,
+    pub log_scroll_offset: usize,
     pub page_size: usize,
     pub search_query: String,
     pub search_active: bool,
@@ -119,7 +128,9 @@ impl App {
             progress: None,
             logs: Vec::new(),
             show_help: false,
-            show_logs: true,
+            log_display_mode: LogDisplayMode::Side,
+            log_selected_index: 0,
+            log_scroll_offset: 0,
             page_size: 20,
             search_query: String::new(),
             search_active: false,
@@ -167,13 +178,70 @@ impl App {
 
         // Toggle log panel with Ctrl+.
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('.') {
-            self.show_logs = !self.show_logs;
-            self.add_log(if self.show_logs {
-                "Log panel shown".to_string()
-            } else {
-                "Log panel hidden".to_string()
+            self.log_display_mode = match self.log_display_mode {
+                LogDisplayMode::Side => LogDisplayMode::None,
+                LogDisplayMode::None => LogDisplayMode::Full,
+                LogDisplayMode::Full => LogDisplayMode::Side,
+            };
+            self.add_log(match self.log_display_mode {
+                LogDisplayMode::Side => "Log panel: side view".to_string(),
+                LogDisplayMode::None => "Log panel: hidden".to_string(),
+                LogDisplayMode::Full => "Log panel: full window".to_string(),
             });
             return None;
+        }
+
+        // Handle log scrolling when in full window mode
+        if matches!(self.log_display_mode, LogDisplayMode::Full) {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.log_selected_index > 0 {
+                        self.log_selected_index -= 1;
+                        // Adjust scroll to keep selected line visible
+                        if self.log_selected_index < self.log_scroll_offset {
+                            self.log_scroll_offset = self.log_selected_index;
+                        }
+                    }
+                    return None;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if self.log_selected_index < self.logs.len().saturating_sub(1) {
+                        self.log_selected_index += 1;
+                        // Adjust scroll to keep selected line visible (will be calculated in UI)
+                    }
+                    return None;
+                }
+                KeyCode::PageUp => {
+                    let page_size = 10;
+                    self.log_selected_index = self.log_selected_index.saturating_sub(page_size);
+                    if self.log_selected_index < self.log_scroll_offset {
+                        self.log_scroll_offset = self.log_selected_index;
+                    }
+                    return None;
+                }
+                KeyCode::PageDown => {
+                    let page_size = 10;
+                    let max_index = self.logs.len().saturating_sub(1);
+                    self.log_selected_index = (self.log_selected_index + page_size).min(max_index);
+                    return None;
+                }
+                KeyCode::Home | KeyCode::Char('H') => {
+                    self.log_selected_index = 0;
+                    self.log_scroll_offset = 0;
+                    return None;
+                }
+                KeyCode::End | KeyCode::Char('G') => {
+                    self.log_selected_index = self.logs.len().saturating_sub(1);
+                    return None;
+                }
+                KeyCode::Esc => {
+                    // Exit full log mode back to side panel
+                    self.log_display_mode = LogDisplayMode::Side;
+                    self.add_log("Log panel: side view".to_string());
+                    return None;
+                }
+                _ => {}
+            }
         }
 
         // Handle search mode input
