@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
 use anyhow::Result;
+use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{Parser, Subcommand};
 use std::fs::File;
 use std::path::PathBuf;
@@ -18,10 +19,19 @@ use commands::{
     OutputFormat, PlayCommand, ProvidersCommand, SearchCommand,
 };
 
+fn cargo_style() -> Styles {
+    Styles::styled()
+        .header(AnsiColor::Green.on_default() | Effects::BOLD)
+        .usage(AnsiColor::Green.on_default() | Effects::BOLD)
+        .literal(AnsiColor::Cyan.on_default() | Effects::BOLD)
+        .placeholder(AnsiColor::Cyan.on_default())
+}
+
 #[derive(Parser)]
 #[command(name = "iptv")]
 #[command(about = "A terminal-based IPTV player with XTream API support")]
 #[command(version)]
+#[command(styles = cargo_style())]
 struct Cli {
     /// Enable verbose (debug) logging
     #[arg(short, long, global = true)]
@@ -49,6 +59,7 @@ enum Commands {
 }
 
 #[derive(Parser)]
+#[command(styles = cargo_style())]
 struct CliCommands {
     /// Provider name to use (or set IPTV_PROVIDER env var)
     #[arg(short, long)]
