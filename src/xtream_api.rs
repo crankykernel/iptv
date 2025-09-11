@@ -700,7 +700,7 @@ impl XTreamAPI {
             .get_cached::<UserInfo>(&self.provider_hash, "user_info", None)
             .await
         {
-            return Ok(cached.data);
+            return Ok(cached);
         }
 
         let response: UserInfoResponse = self.make_request("get_user_info", None).await?;
@@ -731,7 +731,7 @@ impl XTreamAPI {
             .get_cached::<Vec<Category>>(&self.provider_hash, "live_categories", None)
             .await
         {
-            return Ok(cached.data);
+            return Ok(cached);
         }
 
         let categories: Vec<Category> = self.make_request("get_live_categories", None).await?;
@@ -761,7 +761,7 @@ impl XTreamAPI {
             .get_cached::<Vec<Category>>(&self.provider_hash, "vod_categories", None)
             .await
         {
-            return Ok(cached.data);
+            return Ok(cached);
         }
 
         let categories: Vec<Category> = self.make_request("get_vod_categories", None).await?;
@@ -791,7 +791,7 @@ impl XTreamAPI {
             .get_cached::<Vec<Category>>(&self.provider_hash, "series_categories", None)
             .await
         {
-            return Ok(cached.data);
+            return Ok(cached);
         }
 
         let categories: Vec<Category> = self.make_request("get_series_categories", None).await?;
@@ -824,7 +824,6 @@ impl XTreamAPI {
         {
             let filtered_streams = if let Some(cat_id) = category_id {
                 cached
-                    .data
                     .into_iter()
                     .filter(|stream| {
                         stream
@@ -835,7 +834,7 @@ impl XTreamAPI {
                     })
                     .collect()
             } else {
-                cached.data
+                cached
             };
             return Ok(filtered_streams);
         }
@@ -888,7 +887,6 @@ impl XTreamAPI {
         {
             let filtered_streams = if let Some(cat_id) = category_id {
                 cached
-                    .data
                     .into_iter()
                     .filter(|stream| {
                         stream
@@ -899,7 +897,7 @@ impl XTreamAPI {
                     })
                     .collect()
             } else {
-                cached.data
+                cached
             };
             return Ok(filtered_streams);
         }
@@ -952,7 +950,6 @@ impl XTreamAPI {
         {
             let filtered_series = if let Some(cat_id) = category_id {
                 cached
-                    .data
                     .into_iter()
                     .filter(|series| {
                         series
@@ -963,7 +960,7 @@ impl XTreamAPI {
                     })
                     .collect()
             } else {
-                cached.data
+                cached
             };
             return Ok(filtered_series);
         }
@@ -1015,7 +1012,7 @@ impl XTreamAPI {
             .get_cached::<SeriesInfoResponse>(&self.provider_hash, &cache_key, None)
             .await
         {
-            return Ok(cached.data);
+            return Ok(cached);
         }
 
         // Fetch fresh data from API
@@ -1093,7 +1090,7 @@ impl XTreamAPI {
             .get_cached::<VodInfoResponse>(&self.provider_hash, &cache_key, None)
             .await
         {
-            return Ok(cached.data);
+            return Ok(cached);
         }
 
         // Fetch fresh data from API

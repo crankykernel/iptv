@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
-use crate::mpv_player::MpvPlayer;
+pub mod mpv;
+
 use anyhow::{Context, Result};
+use mpv::MpvPlayer;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;

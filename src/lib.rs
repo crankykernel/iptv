@@ -4,7 +4,6 @@
 pub mod cache;
 pub mod config;
 pub mod favourites;
-pub mod mpv_player;
 pub mod player;
 pub mod tui;
 pub mod xtream_api;

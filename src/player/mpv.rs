@@ -14,7 +14,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, warn};
 
-pub struct MpvPlayer {
+pub(super) struct MpvPlayer {
     socket_path: PathBuf,
     mpv_process: Option<Child>,
     last_exit_status: Option<std::process::ExitStatus>,
@@ -28,7 +28,7 @@ impl Default for MpvPlayer {
 }
 
 impl MpvPlayer {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         // Use a predictable socket path that's user-specific
         // This allows multiple instances of the app to find the same MPV instance
         let socket_path = Self::get_socket_path(false);
@@ -37,17 +37,6 @@ impl MpvPlayer {
             mpv_process: None,
             last_exit_status: None,
             is_shared_instance: true,
-        }
-    }
-
-    /// Create an MPV player with an isolated socket (not shared between instances)
-    pub fn new_isolated() -> Self {
-        let socket_path = Self::get_socket_path(true);
-        Self {
-            socket_path,
-            mpv_process: None,
-            last_exit_status: None,
-            is_shared_instance: false,
         }
     }
 
@@ -105,7 +94,7 @@ impl MpvPlayer {
     }
 
     /// Try to connect to an existing MPV instance
-    pub async fn try_connect_existing() -> Option<Self> {
+    pub(super) async fn try_connect_existing() -> Option<Self> {
         let socket_path = Self::get_socket_path(false);
 
         if !socket_path.exists() {
@@ -186,7 +175,7 @@ impl MpvPlayer {
     }
 
     /// Launch MPV with IPC socket enabled
-    pub async fn launch(&mut self) -> Result<()> {
+    pub(super) async fn launch(&mut self) -> Result<()> {
         debug!("Launching MPV with IPC socket at {:?}", self.socket_path);
 
         // Check if MPV is already running
@@ -325,7 +314,7 @@ impl MpvPlayer {
     }
 
     /// Play or replace current video with new URL
-    pub async fn play(&self, video_url: &str) -> Result<()> {
+    pub(super) async fn play(&self, video_url: &str) -> Result<()> {
         debug!("Playing video: {}", video_url);
 
         // Check if MPV is still running
@@ -356,12 +345,12 @@ impl MpvPlayer {
     }
 
     /// Stop MPV playback and optionally kill the process
-    pub async fn stop(&mut self) -> Result<()> {
+    pub(super) async fn stop(&mut self) -> Result<()> {
         self.stop_with_kill(true).await
     }
 
     /// Stop MPV playback with option to keep process running
-    pub async fn stop_with_kill(&mut self, kill_process: bool) -> Result<()> {
+    pub(super) async fn stop_with_kill(&mut self, kill_process: bool) -> Result<()> {
         debug!("Stopping MPV playback (kill_process: {})", kill_process);
 
         // Try to stop via IPC first
@@ -395,13 +384,13 @@ impl MpvPlayer {
     }
 
     /// Force shutdown MPV
-    pub async fn shutdown(&mut self) -> Result<()> {
+    pub(super) async fn shutdown(&mut self) -> Result<()> {
         debug!("Shutting down MPV player");
         self.stop_with_kill(true).await
     }
 
     /// Detach MPV process - let it continue running independently
-    pub fn detach(&mut self) {
+    pub(super) fn detach(&mut self) {
         debug!("Detaching MPV process - will continue running independently");
         // Take ownership of the process handle without killing it
         self.mpv_process.take();
@@ -409,7 +398,7 @@ impl MpvPlayer {
     }
 
     /// Check if MPV is running
-    pub async fn is_running(&mut self) -> bool {
+    pub(super) async fn is_running(&mut self) -> bool {
         // First check if we have a process handle and if it's still running
         if let Some(ref mut proc) = self.mpv_process {
             match proc.try_wait() {
@@ -447,53 +436,13 @@ impl MpvPlayer {
     }
 
     /// Get the last exit status if MPV has exited
-    pub fn get_last_exit_status(&self) -> Option<std::process::ExitStatus> {
+    pub(super) fn get_last_exit_status(&self) -> Option<std::process::ExitStatus> {
         self.last_exit_status
     }
 
     /// Clear the last exit status
-    pub fn clear_last_exit_status(&mut self) {
+    pub(super) fn clear_last_exit_status(&mut self) {
         self.last_exit_status = None;
-    }
-
-    /// Pause/unpause playback
-    pub async fn pause(&self) -> Result<()> {
-        self.send_command(json!({
-            "command": ["cycle", "pause"]
-        }))
-        .context("Failed to pause MPV")?;
-        Ok(())
-    }
-
-    /// Set volume (0-100)
-    pub async fn set_volume(&self, volume: u8) -> Result<()> {
-        let volume = volume.min(100);
-        self.send_command(json!({
-            "command": ["set_property", "volume", volume]
-        }))
-        .context("Failed to set MPV volume")?;
-        Ok(())
-    }
-
-    /// Seek to position in seconds
-    pub async fn seek(&self, position: f64) -> Result<()> {
-        self.send_command(json!({
-            "command": ["seek", position, "absolute"]
-        }))
-        .context("Failed to seek in MPV")?;
-        Ok(())
-    }
-
-    /// Get current playback position
-    pub async fn get_position(&self) -> Result<f64> {
-        let response = self.send_command(json!({
-            "command": ["get_property", "time-pos"]
-        }))?;
-
-        response
-            .get("data")
-            .and_then(|d| d.as_f64())
-            .ok_or_else(|| anyhow::anyhow!("Failed to get playback position"))
     }
 }
 

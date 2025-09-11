@@ -31,13 +31,13 @@ impl CacheMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CachedData<T> {
-    pub metadata: CacheMetadata,
-    pub data: T,
+pub(crate) struct CachedData<T> {
+    pub(crate) metadata: CacheMetadata,
+    pub(crate) data: T,
 }
 
 impl<T> CachedData<T> {
-    pub fn new(data: T, metadata: CacheMetadata) -> Self {
+    fn new(data: T, metadata: CacheMetadata) -> Self {
         Self { metadata, data }
     }
 }
@@ -165,7 +165,7 @@ impl CacheManager {
         provider_hash: &str,
         cache_type: &str,
         category_id: Option<&str>,
-    ) -> Result<Option<CachedData<T>>>
+    ) -> Result<Option<T>>
     where
         T: for<'de> Deserialize<'de>,
     {
@@ -182,7 +182,7 @@ impl CacheManager {
         let cached_data: CachedData<T> = serde_json::from_str(&content)
             .with_context(|| format!("Failed to parse cache JSON: {}", cache_path.display()))?;
 
-        Ok(Some(cached_data))
+        Ok(Some(cached_data.data))
     }
 
     pub async fn store_cache<T>(
@@ -245,57 +245,6 @@ impl CacheManager {
                 })?;
         }
         self.ensure_cache_dir_exists()?;
-        Ok(())
-    }
-
-    pub fn list_cached_providers(&self) -> Vec<(String, String)> {
-        self.provider_index
-            .iter()
-            .map(|(url, hash)| (url.clone(), hash.clone()))
-            .collect()
-    }
-
-    pub async fn warm_cache<T, F, Fut>(
-        &self,
-        provider_hash: &str,
-        cache_entries: Vec<(String, Option<String>)>,
-        fetcher: F,
-    ) -> Result<()>
-    where
-        T: Serialize + for<'de> Deserialize<'de>,
-        F: Fn(String, Option<String>) -> Fut,
-        Fut: std::future::Future<Output = Result<T>>,
-    {
-        for (cache_type, category_id) in cache_entries {
-            if let Ok(Some(_cached)) = self
-                .get_cached::<T>(provider_hash, &cache_type, category_id.as_deref())
-                .await
-            {
-                // Cache exists, no need to clean
-                continue;
-            }
-
-            match fetcher(cache_type.clone(), category_id.clone()).await {
-                Ok(data) => {
-                    let metadata = CacheMetadata::new("".to_string(), None);
-                    if let Err(e) = self
-                        .store_cache(
-                            provider_hash,
-                            &cache_type,
-                            category_id.as_deref(),
-                            data,
-                            metadata,
-                        )
-                        .await
-                    {
-                        eprintln!("Failed to cache {}: {}", cache_type, e);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Failed to fetch {} for warming: {}", cache_type, e);
-                }
-            }
-        }
         Ok(())
     }
 }
