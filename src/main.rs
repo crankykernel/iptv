@@ -23,18 +23,6 @@ use commands::{
 #[command(about = "A terminal-based IPTV player with XTream API support")]
 #[command(version)]
 struct Cli {
-    /// Configuration file path
-    #[arg(short, long, value_name = "FILE", global = true)]
-    config: Option<PathBuf>,
-
-    /// Provider name to use (or set IPTV_PROVIDER env var)
-    #[arg(short, long, global = true)]
-    provider: Option<String>,
-
-    /// Execute command across all providers
-    #[arg(long, global = true)]
-    all: bool,
-
     /// Enable verbose (debug) logging
     #[arg(short, long, global = true)]
     verbose: bool,
@@ -53,7 +41,6 @@ enum Commands {
     Tui,
 
     /// Command-line interface for scriptable operations
-    #[command(subcommand)]
     Cli(CliCommands),
 
     /// Execute raw API calls
@@ -61,8 +48,18 @@ enum Commands {
     Api(ApiCommand),
 }
 
+#[derive(Parser)]
+struct CliCommands {
+    /// Provider name to use (or set IPTV_PROVIDER env var)
+    #[arg(short, long)]
+    provider: Option<String>,
+
+    #[command(subcommand)]
+    command: CliSubcommands,
+}
+
 #[derive(Subcommand)]
-enum CliCommands {
+enum CliSubcommands {
     /// Play stream/movie/episode by ID
     Play {
         /// Stream/Movie/Series ID
@@ -428,11 +425,9 @@ async fn main() -> Result<()> {
     }
 
     // Load configuration
-    let config_path = cli.config.unwrap_or_else(|| {
-        dirs::config_dir()
-            .map(|p| p.join("iptv").join("config.toml"))
-            .unwrap_or_else(|| PathBuf::from("config.toml"))
-    });
+    let config_path = dirs::config_dir()
+        .map(|p| p.join("iptv").join("config.toml"))
+        .unwrap_or_else(|| PathBuf::from("config.toml"));
 
     let config = if config_path.exists() {
         Config::load(&config_path)?
@@ -441,12 +436,6 @@ async fn main() -> Result<()> {
         eprintln!("Run 'iptv cli add-provider' to create one.");
         Config::default()
     };
-
-    // Get provider from env var if not specified
-    let selected_provider = cli.provider.or_else(|| std::env::var("IPTV_PROVIDER").ok());
-
-    // Create command context
-    let context = CommandContext::new(config.providers.clone(), selected_provider, cli.all);
 
     // Create player
     let player = Player::new();
@@ -462,145 +451,161 @@ async fn main() -> Result<()> {
             iptv::run_tui(config, player).await?;
         }
 
-        Some(Commands::Cli(cli_cmd)) => match cli_cmd {
-            CliCommands::Play {
-                id,
-                r#type,
-                detached,
-            } => {
-                let content_type = r#type.map(|t| ContentType::from_str(&t)).transpose()?;
-                let cmd = PlayCommand {
+        Some(Commands::Cli(cli_args)) => {
+            // Get provider from cli args or env var
+            let selected_provider = cli_args
+                .provider
+                .or_else(|| std::env::var("IPTV_PROVIDER").ok());
+
+            // Create command context
+            let context = CommandContext::new(config.providers.clone(), selected_provider, false);
+
+            match cli_args.command {
+                CliSubcommands::Play {
                     id,
-                    content_type,
+                    r#type,
                     detached,
-                };
-                cmd.execute(context, player).await?;
-            }
+                } => {
+                    let content_type = r#type.map(|t| ContentType::from_str(&t)).transpose()?;
+                    let cmd = PlayCommand {
+                        id,
+                        content_type,
+                        detached,
+                    };
+                    cmd.execute(context, player).await?;
+                }
 
-            CliCommands::Search {
-                query,
-                r#type,
-                format,
-            } => {
-                let content_type = r#type.map(|t| ContentType::from_str(&t)).transpose()?;
-                let output_format = OutputFormat::from_str(&format)?;
-                let cmd = SearchCommand {
+                CliSubcommands::Search {
                     query,
-                    content_type,
-                    format: output_format,
-                };
-                cmd.execute(context).await?;
-            }
+                    r#type,
+                    format,
+                } => {
+                    let content_type = r#type.map(|t| ContentType::from_str(&t)).transpose()?;
+                    let output_format = OutputFormat::from_str(&format)?;
+                    let cmd = SearchCommand {
+                        query,
+                        content_type,
+                        format: output_format,
+                    };
+                    cmd.execute(context).await?;
+                }
 
-            CliCommands::List(list_cmd) => {
-                let (content_type, category, format, limit) = match list_cmd {
-                    ListSubCommand::Live {
-                        category,
-                        format,
-                        limit,
-                    } => (ContentType::Live, category, format, limit),
-                    ListSubCommand::Movie {
-                        category,
-                        format,
-                        limit,
-                    }
-                    | ListSubCommand::Movies {
-                        category,
-                        format,
-                        limit,
-                    }
-                    | ListSubCommand::Vod {
-                        category,
-                        format,
-                        limit,
-                    } => (ContentType::Movie, category, format, limit),
-                    ListSubCommand::Series {
-                        category,
-                        format,
-                        limit,
-                    }
-                    | ListSubCommand::Tv {
-                        category,
-                        format,
-                        limit,
-                    } => (ContentType::Series, category, format, limit),
-                };
-
-                let output_format = OutputFormat::from_str(&format)?;
-                let cmd = ListCommand {
-                    content_type,
-                    category,
-                    format: output_format,
-                    limit,
-                };
-                cmd.execute(context).await?;
-            }
-
-            CliCommands::Info { id, r#type, format } => {
-                let content_type = ContentType::from_str(&r#type)?;
-                let output_format = OutputFormat::from_str(&format)?;
-                let cmd = InfoCommand {
-                    id,
-                    content_type,
-                    format: output_format,
-                };
-                cmd.execute(context).await?;
-            }
-
-            CliCommands::Url { id, r#type } => {
-                let (api, _) = context.get_single_provider().await?;
-                let url = api.get_stream_url(id, &r#type, None);
-                println!("{}", url);
-            }
-
-            CliCommands::Fav(fav_cmd) => {
-                let cmd = match fav_cmd {
-                    FavCommand::List { format } => {
-                        let output_format = OutputFormat::from_str(&format)?;
-                        FavoritesCommand::List {
-                            format: output_format,
+                CliSubcommands::List(list_cmd) => {
+                    let (content_type, category, format, limit) = match list_cmd {
+                        ListSubCommand::Live {
+                            category,
+                            format,
+                            limit,
+                        } => (ContentType::Live, category, format, limit),
+                        ListSubCommand::Movie {
+                            category,
+                            format,
+                            limit,
                         }
-                    }
-                    FavCommand::Add { id, r#type, name } => {
-                        let content_type = ContentType::from_str(&r#type)?;
-                        FavoritesCommand::Add {
-                            id,
-                            content_type,
-                            name,
+                        | ListSubCommand::Movies {
+                            category,
+                            format,
+                            limit,
                         }
-                    }
-                    FavCommand::Remove { id } => FavoritesCommand::Remove { id },
-                };
-                cmd.execute(context).await?;
-            }
-
-            CliCommands::Cache(cache_cmd) => {
-                let cmd = match cache_cmd {
-                    CacheSubCommand::Refresh => CacheCommand::Refresh,
-                    CacheSubCommand::Clear => CacheCommand::Clear,
-                };
-                cmd.execute(context).await?;
-            }
-
-            CliCommands::Providers(providers_cmd) => {
-                let cmd = match providers_cmd {
-                    ProvidersSubCommand::List { format } => {
-                        let output_format = OutputFormat::from_str(&format)?;
-                        ProvidersCommand::List {
-                            format: output_format,
+                        | ListSubCommand::Vod {
+                            category,
+                            format,
+                            limit,
+                        } => (ContentType::Movie, category, format, limit),
+                        ListSubCommand::Series {
+                            category,
+                            format,
+                            limit,
                         }
-                    }
-                    ProvidersSubCommand::Test { name } => ProvidersCommand::Test { name },
-                };
-                cmd.execute(context).await?;
-            }
+                        | ListSubCommand::Tv {
+                            category,
+                            format,
+                            limit,
+                        } => (ContentType::Series, category, format, limit),
+                    };
 
-            CliCommands::AddProvider => {
-                add_provider_interactively(config_path).await?;
+                    let output_format = OutputFormat::from_str(&format)?;
+                    let cmd = ListCommand {
+                        content_type,
+                        category,
+                        format: output_format,
+                        limit,
+                    };
+                    cmd.execute(context).await?;
+                }
+
+                CliSubcommands::Info { id, r#type, format } => {
+                    let content_type = ContentType::from_str(&r#type)?;
+                    let output_format = OutputFormat::from_str(&format)?;
+                    let cmd = InfoCommand {
+                        id,
+                        content_type,
+                        format: output_format,
+                    };
+                    cmd.execute(context).await?;
+                }
+
+                CliSubcommands::Url { id, r#type } => {
+                    let (api, _) = context.get_single_provider().await?;
+                    let url = api.get_stream_url(id, &r#type, None);
+                    println!("{}", url);
+                }
+
+                CliSubcommands::Fav(fav_cmd) => {
+                    let cmd = match fav_cmd {
+                        FavCommand::List { format } => {
+                            let output_format = OutputFormat::from_str(&format)?;
+                            FavoritesCommand::List {
+                                format: output_format,
+                            }
+                        }
+                        FavCommand::Add { id, r#type, name } => {
+                            let content_type = ContentType::from_str(&r#type)?;
+                            FavoritesCommand::Add {
+                                id,
+                                content_type,
+                                name,
+                            }
+                        }
+                        FavCommand::Remove { id } => FavoritesCommand::Remove { id },
+                    };
+                    cmd.execute(context).await?;
+                }
+
+                CliSubcommands::Cache(cache_cmd) => {
+                    let cmd = match cache_cmd {
+                        CacheSubCommand::Refresh => CacheCommand::Refresh,
+                        CacheSubCommand::Clear => CacheCommand::Clear,
+                    };
+                    cmd.execute(context).await?;
+                }
+
+                CliSubcommands::Providers(providers_cmd) => {
+                    let cmd = match providers_cmd {
+                        ProvidersSubCommand::List { format } => {
+                            let output_format = OutputFormat::from_str(&format)?;
+                            ProvidersCommand::List {
+                                format: output_format,
+                            }
+                        }
+                        ProvidersSubCommand::Test { name } => ProvidersCommand::Test { name },
+                    };
+                    cmd.execute(context).await?;
+                }
+
+                CliSubcommands::AddProvider => {
+                    add_provider_interactively(config_path).await?;
+                }
             }
-        },
+        }
 
         Some(Commands::Api(api_cmd)) => {
+            // Get provider from env var for API commands
+            let selected_provider = std::env::var("IPTV_PROVIDER").ok();
+
+            // Create command context
+            let context = CommandContext::new(config.providers.clone(), selected_provider, false);
+
             let (mut api, provider_name) = context.get_single_provider().await?;
             eprintln!("Using provider: {}", provider_name);
             run_api_command(&provider_name, &mut api, api_cmd).await?;
