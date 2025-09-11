@@ -13,8 +13,8 @@ use iptv::config::ProviderConfig;
 use iptv::xtream_api::XTreamAPI;
 use iptv::{Config, Player};
 
-mod commands;
-use commands::{
+mod cli;
+use cli::{
     CacheCommand, CommandContext, ContentType, FavoritesCommand, InfoCommand, ListCommand,
     OutputFormat, PlayCommand, ProvidersCommand, SearchCommand,
 };
