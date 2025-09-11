@@ -259,14 +259,14 @@ fn draw_full_window_logs(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Calculate visible range based on scroll position
     let visible_count = inner_area.height as usize;
-    
+
     // Adjust scroll offset to keep selected line visible
     if app.log_selected_index >= app.log_scroll_offset + visible_count {
         app.log_scroll_offset = app.log_selected_index.saturating_sub(visible_count - 1);
     }
-    
+
     let end_idx = (app.log_scroll_offset + visible_count).min(app.logs.len());
-    
+
     // Create log items with highlighting for selected line
     let log_items: Vec<ListItem> = app.logs[app.log_scroll_offset..end_idx]
         .iter()
@@ -290,11 +290,7 @@ fn draw_full_window_logs(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Draw scrollbar indicator if there are more logs than visible
     if app.logs.len() > visible_count {
-        let scrollbar_info = format!(
-            " [{}/{}] ",
-            app.log_selected_index + 1,
-            app.logs.len()
-        );
+        let scrollbar_info = format!(" [{}/{}] ", app.log_selected_index + 1, app.logs.len());
         let scrollbar_area = Rect {
             x: area.x + area.width - scrollbar_info.len() as u16 - 1,
             y: area.y,
@@ -302,8 +298,7 @@ fn draw_full_window_logs(frame: &mut Frame, app: &mut App, area: Rect) {
             height: 1,
         };
         frame.render_widget(
-            Paragraph::new(scrollbar_info)
-                .style(Style::default().fg(Color::Yellow)),
+            Paragraph::new(scrollbar_info).style(Style::default().fg(Color::Yellow)),
             scrollbar_area,
         );
     }
@@ -322,7 +317,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 LogDisplayMode::None => "Show Logs",
                 LogDisplayMode::Full => "Hide Logs", // This shouldn't be reached but included for completeness
             };
-            
+
             match &app.state {
                 AppState::VodInfo(_) => {
                     format!(

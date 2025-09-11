@@ -241,7 +241,7 @@ impl App {
                     return None;
                 }
                 _ => {
-                    // Consume all other keys in full log mode to prevent them from 
+                    // Consume all other keys in full log mode to prevent them from
                     // triggering actions in the underlying screens
                     return None;
                 }
