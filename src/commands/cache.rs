@@ -13,13 +13,14 @@ impl CacheCommand {
         match self {
             Self::Refresh => {
                 for (mut api, provider_name) in providers {
-                    eprintln!("Refreshing cache for {}...", provider_name);
-
-                    // Warm the cache with essential data
-                    if let Err(e) = api.warm_cache().await {
-                        eprintln!("Warning: Failed to warm cache for {}: {}", provider_name, e);
+                    // Force refresh the cache (clear then warm)
+                    if let Err(e) = api.refresh_cache().await {
+                        eprintln!(
+                            "Warning: Failed to refresh cache for {}: {}",
+                            provider_name, e
+                        );
                     } else {
-                        println!("Cache refreshed for {}", provider_name);
+                        println!("\n✓ Cache refreshed for {}", provider_name);
                     }
                 }
             }

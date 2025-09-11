@@ -514,16 +514,24 @@ impl XTreamAPI {
             url.push_str(&format!("&category_id={}", cat_id));
         }
 
+        // Create a friendly action description
+        let action_desc = match action {
+            "get_live_categories" => "live categories",
+            "get_vod_categories" => "VOD categories",
+            "get_series_categories" => "series categories",
+            "get_live_streams" => "live streams",
+            "get_vod_streams" => "VOD streams",
+            "get_series" => "series",
+            "get_series_info" => "series info",
+            "get_vod_info" => "VOD info",
+            "get_user_info" => "user info",
+            _ => action,
+        };
+
+        let provider_name = self.provider_name.as_deref().unwrap_or("provider");
+
         if let Some(ref logger) = self.logger {
-            logger(format!(
-                "Requesting: {} (action: {}, category: {:?})",
-                url, action, category_id
-            ));
-        } else if self.show_progress {
-            println!(
-                "Requesting: {} (action: {}, category: {:?})",
-                url, action, category_id
-            );
+            logger(format!("Refreshing {} {}", provider_name, action_desc));
         }
 
         // Create progress bar only if not in TUI mode
@@ -531,14 +539,14 @@ impl XTreamAPI {
             let pb = ProgressBar::new_spinner();
             pb.set_style(
                 ProgressStyle::default_spinner()
-                    .template("{spinner:.green} {msg} [{elapsed_precise}] {bytes}")
+                    .template("{spinner:.green} Refreshing {msg} [{elapsed_precise}]")
                     .unwrap_or_else(|_| ProgressStyle::default_spinner()),
             );
-            pb.set_message("Sending request...");
+            pb.set_message(format!("{} {}", provider_name, action_desc));
             Some(pb)
         } else {
             if let Some(ref logger) = self.logger {
-                logger("Sending request...".to_string());
+                logger(format!("Refreshing {} {}", provider_name, action_desc));
             }
             None
         };
@@ -552,7 +560,12 @@ impl XTreamAPI {
 
         if !response.status().is_success() {
             if let Some(pb) = &pb {
-                pb.finish_and_clear();
+                pb.finish_with_message(format!(
+                    "✗ {} {} - HTTP {}",
+                    provider_name,
+                    action_desc,
+                    response.status()
+                ));
             }
             return Err(anyhow::anyhow!(
                 "HTTP request failed with status: {}",
@@ -560,11 +573,7 @@ impl XTreamAPI {
             ));
         }
 
-        if let Some(pb) = &pb {
-            pb.set_message("Downloading...");
-        } else if let Some(ref logger) = self.logger {
-            logger("Downloading...".to_string());
-        }
+        // Don't update message during download, keep the action description
 
         // Stream the response and track bytes
         let mut response_bytes = Vec::new();
@@ -587,41 +596,37 @@ impl XTreamAPI {
                     format!("{:.1} MB", response_bytes.len() as f64 / (1024.0 * 1024.0))
                 };
 
-                let message = format!("Downloading... {}", bytes_str);
-                pb.set_message(message);
+                pb.set_message(format!("{} {} - {}", provider_name, action_desc, bytes_str));
             }
         }
 
-        if let Some(pb) = &pb {
-            pb.set_message("Parsing JSON...");
-        } else if let Some(ref logger) = self.logger {
-            logger("Parsing JSON...".to_string());
-        }
-
-        if let Some(ref logger) = self.logger {
-            logger(format!("Response size: {} bytes", response_bytes.len()));
-        } else if self.show_progress {
-            println!("Response size: {} bytes", response_bytes.len());
-        }
+        // Don't show parsing message anymore, keep the action description
 
         if response_bytes.is_empty() {
             if let Some(pb) = &pb {
-                pb.finish_and_clear();
+                pb.finish_with_message(format!(
+                    "✗ {} {} - empty response",
+                    provider_name, action_desc
+                ));
             }
             return Err(anyhow::anyhow!("Empty response from server"));
         }
 
+        let response_size = response_bytes.len();
         let response_text = String::from_utf8(response_bytes)
             .with_context(|| "Failed to convert response to UTF-8 string")?;
 
         if response_text.trim().is_empty() {
             if let Some(pb) = &pb {
-                pb.finish_and_clear();
+                pb.finish_with_message(format!(
+                    "✗ {} {} - empty response",
+                    provider_name, action_desc
+                ));
             }
             return Err(anyhow::anyhow!("Empty response from server"));
         }
 
-        let json: T = serde_json::from_str(&response_text).map_err(|e| {
+        let json_result: Result<T> = serde_json::from_str(&response_text).map_err(|e| {
             // Get detailed error information with character position
             let error_msg = {
                 let line_num = e.line();
@@ -657,10 +662,34 @@ impl XTreamAPI {
 
             warn!("JSON parsing error: {}", error_msg);
             anyhow::anyhow!(error_msg)
-        })?;
+        });
+
+        let json = match json_result {
+            Ok(j) => j,
+            Err(e) => {
+                if let Some(pb) = &pb {
+                    pb.finish_with_message(format!(
+                        "✗ {} {} - parse error",
+                        provider_name, action_desc
+                    ));
+                }
+                return Err(e);
+            }
+        };
 
         if let Some(pb) = pb {
-            pb.finish_and_clear();
+            // Format final size
+            let bytes_str = if response_size < 1024 {
+                format!("{} B", response_size)
+            } else if response_size < 1024 * 1024 {
+                format!("{:.1} KB", response_size as f64 / 1024.0)
+            } else {
+                format!("{:.1} MB", response_size as f64 / (1024.0 * 1024.0))
+            };
+            pb.finish_with_message(format!(
+                "✓ {} {} - {}",
+                provider_name, action_desc, bytes_str
+            ));
         }
         Ok(json)
     }
@@ -1174,6 +1203,12 @@ impl XTreamAPI {
         self.cache_manager
             .clear_provider_cache(&self.provider_hash)
             .await
+    }
+
+    pub async fn refresh_cache(&mut self) -> Result<()> {
+        // Clear existing cache first to force refresh
+        self.clear_cache().await?;
+        self.warm_cache().await
     }
 
     pub async fn warm_cache(&mut self) -> Result<()> {
