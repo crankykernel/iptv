@@ -10,7 +10,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
 
 use iptv::config::ProviderConfig;
-use iptv::xtream_api::XTreamAPI;
+use iptv::xtream::XTreamAPI;
 use iptv::{Config, Player};
 
 mod cli;

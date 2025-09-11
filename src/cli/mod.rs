@@ -3,7 +3,7 @@ use inquire::Select;
 use serde::{Deserialize, Serialize};
 
 use iptv::config::ProviderConfig;
-use iptv::xtream_api::XTreamAPI;
+use iptv::xtream::XTreamAPI;
 
 pub mod cache;
 pub mod favorites;

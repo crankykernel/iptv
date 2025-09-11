@@ -6,13 +6,13 @@ pub mod config;
 pub mod favourites;
 pub mod player;
 pub mod tui;
-pub mod xtream_api;
+pub mod xtream;
 
 pub use cache::CacheManager;
 pub use config::Config;
 pub use favourites::FavouritesManager;
 pub use player::Player;
-pub use xtream_api::XTreamAPI;
+pub use xtream::XTreamAPI;
 
 use anyhow::Result;
 

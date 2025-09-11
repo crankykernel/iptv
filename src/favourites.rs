@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
 use crate::config::Config;
-use crate::xtream_api::FavouriteStream;
+use crate::xtream::FavouriteStream;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;

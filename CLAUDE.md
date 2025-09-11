@@ -88,3 +88,4 @@ The TUI uses a state machine pattern (`AppState` enum) to manage navigation:
 - **Fuzzy Search**: Real-time filtering using fuzzy-matcher
 - **State Preservation**: Navigation state saved when drilling into content
 - **Cross-Provider Support**: Unified favourite system across multiple providers
+- Always make sure project is "cargo clippy" clean before commit. Always run "cargo fmt" before commit, but after fixing clippy issues.

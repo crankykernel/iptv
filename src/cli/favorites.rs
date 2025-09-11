@@ -1,6 +1,6 @@
 use super::{CommandContext, ContentType, OutputFormat};
 use anyhow::Result;
-use iptv::xtream_api::FavouriteStream;
+use iptv::xtream::FavouriteStream;
 use serde_json::json;
 
 pub enum FavoritesCommand {

@@ -20,9 +20,7 @@ impl std::fmt::Display for ContentType {
 }
 use crate::config::ProviderConfig;
 use crate::player::Player;
-use crate::xtream_api::{
-    ApiEpisode, Category, FavouriteStream, Stream, VodInfoResponse, XTreamAPI,
-};
+use crate::xtream::{ApiEpisode, Category, FavouriteStream, Stream, VodInfoResponse, XTreamAPI};
 use chrono::{DateTime, Local};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashMap;
@@ -1339,7 +1337,7 @@ impl App {
                             // Group series by series_id to collect all categories
                             let mut series_map: std::collections::HashMap<
                                 u32,
-                                (crate::xtream_api::SeriesInfo, Vec<String>),
+                                (crate::xtream::SeriesInfo, Vec<String>),
                             > = std::collections::HashMap::new();
 
                             for info in series_infos {
@@ -1668,7 +1666,7 @@ impl App {
                 }
             } else {
                 // Add to favourites
-                let favourite = crate::xtream_api::FavouriteStream {
+                let favourite = crate::xtream::FavouriteStream {
                     stream_id: stream.stream_id,
                     name: stream.name.clone(),
                     stream_type: stream.stream_type.clone(),
