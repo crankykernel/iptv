@@ -226,13 +226,25 @@ fn draw_logs_panel(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // Show most recent logs that fit in the area
+    // Show most recent logs at the top, limited by visible area
     let visible_count = inner_area.height as usize;
-    let start = app.logs.len().saturating_sub(visible_count);
 
-    let log_lines: Vec<Line> = app.logs[start..]
+    // Reverse the logs and take the most recent ones
+    let log_lines: Vec<Line> = app
+        .logs
         .iter()
-        .map(|(_, msg)| Line::from(msg.clone()).style(Style::default().fg(Color::Gray)))
+        .rev() // Most recent first
+        .take(visible_count)
+        .map(|(timestamp, msg)| {
+            let time_str = timestamp.format("%H:%M:%S").to_string();
+            Line::from(vec![
+                Span::styled(
+                    format!("[{}] ", time_str),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(msg.clone(), Style::default().fg(Color::Gray)),
+            ])
+        })
         .collect();
 
     let logs = Paragraph::new(log_lines).wrap(Wrap { trim: true });
@@ -260,19 +272,26 @@ fn draw_full_window_logs(frame: &mut Frame, app: &mut App, area: Rect) {
     // Calculate visible range based on scroll position
     let visible_count = inner_area.height as usize;
 
+    // Create reversed logs with timestamps
+    let reversed_logs: Vec<_> = app.logs.iter().rev().collect();
+    let total_logs = reversed_logs.len();
+
     // Adjust scroll offset to keep selected line visible
     if app.log_selected_index >= app.log_scroll_offset + visible_count {
         app.log_scroll_offset = app.log_selected_index.saturating_sub(visible_count - 1);
     }
 
-    let end_idx = (app.log_scroll_offset + visible_count).min(app.logs.len());
+    let end_idx = (app.log_scroll_offset + visible_count).min(total_logs);
 
-    // Create log items with highlighting for selected line
-    let log_items: Vec<ListItem> = app.logs[app.log_scroll_offset..end_idx]
+    // Create log items with highlighting for selected line and timestamps
+    let log_items: Vec<ListItem> = reversed_logs[app.log_scroll_offset..end_idx]
         .iter()
         .enumerate()
-        .map(|(idx, (_, msg))| {
+        .map(|(idx, (timestamp, msg))| {
             let actual_idx = app.log_scroll_offset + idx;
+            let time_str = timestamp.format("%H:%M:%S").to_string();
+            let formatted_msg = format!("[{}] {}", time_str, msg);
+
             let style = if actual_idx == app.log_selected_index {
                 Style::default()
                     .bg(Color::DarkGray)
@@ -281,7 +300,7 @@ fn draw_full_window_logs(frame: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 Style::default().fg(Color::Gray)
             };
-            ListItem::new(msg.clone()).style(style)
+            ListItem::new(formatted_msg).style(style)
         })
         .collect();
 
@@ -289,8 +308,8 @@ fn draw_full_window_logs(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(logs_list, inner_area);
 
     // Draw scrollbar indicator if there are more logs than visible
-    if app.logs.len() > visible_count {
-        let scrollbar_info = format!(" [{}/{}] ", app.log_selected_index + 1, app.logs.len());
+    if total_logs > visible_count {
+        let scrollbar_info = format!(" [{}/{}] ", app.log_selected_index + 1, total_logs);
         let scrollbar_area = Rect {
             x: area.x + area.width - scrollbar_info.len() as u16 - 1,
             y: area.y,

@@ -23,9 +23,9 @@ use crate::player::Player;
 use crate::xtream_api::{
     ApiEpisode, Category, FavouriteStream, Stream, VodInfoResponse, XTreamAPI,
 };
+use chrono::{DateTime, Local};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashMap;
-use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub enum LogDisplayMode {
@@ -100,7 +100,7 @@ pub struct App {
     pub items: Vec<String>,
     pub status_message: Option<String>,
     pub progress: Option<(f64, String)>,
-    pub logs: Vec<(Instant, String)>,
+    pub logs: Vec<(DateTime<Local>, String)>,
     pub show_help: bool,
     pub log_display_mode: LogDisplayMode,
     pub log_selected_index: usize,
@@ -2284,7 +2284,7 @@ impl App {
     }
 
     fn add_log(&mut self, message: String) {
-        self.logs.push((Instant::now(), message));
+        self.logs.push((Local::now(), message));
         // Keep only last 100 logs
         if self.logs.len() > 100 {
             self.logs.remove(0);
