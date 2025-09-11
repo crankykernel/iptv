@@ -73,6 +73,38 @@ impl Player {
         Ok(())
     }
 
+    /// Play video and wait for it to finish (blocking)
+    pub async fn play_blocking(&self, url: &str) -> Result<()> {
+        if !self.use_mpv {
+            return Err(anyhow::anyhow!(
+                "MPV is not installed. Please install MPV to use this application."
+            ));
+        }
+
+        // Launch MPV and wait for it to complete
+        let mut cmd = std::process::Command::new("mpv");
+        cmd.arg(url)
+            .arg("--force-window=yes")
+            .arg("--keep-open=yes")
+            .arg("--title=IPTV Stream")
+            .arg("--geometry=1280x720")
+            .arg("--autofit-larger=90%x90%");
+
+        // Run MPV and wait for it to exit
+        let status = cmd.status().context("Failed to start MPV")?;
+
+        if !status.success()
+            && let Some(code) = status.code()
+        {
+            // Exit code 4 is normal user quit in MPV
+            if code != 4 {
+                return Err(anyhow::anyhow!("MPV exited with code: {}", code));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Play video in completely disassociated window - no RPC, won't be killed/replaced
     pub async fn play_disassociated(&self, url: &str) -> Result<()> {
         if !self.use_mpv {

@@ -3,16 +3,20 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use inquire::{Password, Text};
 use std::fs::File;
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::prelude::*;
 
-use inquire::Select;
 use iptv::config::ProviderConfig;
-use iptv::xtream_api::{FavouriteStream, XTreamAPI};
-use iptv::{Config, MenuSystem, Player};
-use std::process::{Command, Stdio};
+use iptv::xtream_api::XTreamAPI;
+use iptv::{Config, Player};
+
+mod commands;
+use commands::{
+    CacheCommand, CommandContext, ContentType, FavoritesCommand, InfoCommand, ListCommand,
+    OutputFormat, PlayCommand, ProvidersCommand, SearchCommand,
+};
 
 #[derive(Parser)]
 #[command(name = "iptv")]
@@ -20,19 +24,23 @@ use std::process::{Command, Stdio};
 #[command(version)]
 struct Cli {
     /// Configuration file path
-    #[arg(short, long, value_name = "FILE")]
+    #[arg(short, long, value_name = "FILE", global = true)]
     config: Option<PathBuf>,
 
+    /// Provider name to use (or set IPTV_PROVIDER env var)
+    #[arg(short, long, global = true)]
+    provider: Option<String>,
+
+    /// Execute command across all providers
+    #[arg(long, global = true)]
+    all: bool,
+
     /// Enable verbose (debug) logging
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     verbose: bool,
 
-    /// Use TUI (Terminal User Interface) mode
-    #[arg(long)]
-    tui: bool,
-
     /// Enable debug logging to file (iptv_debug.log)
-    #[arg(long)]
+    #[arg(long, global = true)]
     debug_log: bool,
 
     #[command(subcommand)]
@@ -41,427 +49,334 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Launch rofi menu with favourites
-    Rofi,
-    /// Interactively add a new Xtreme API provider to the configuration
+    /// Launch interactive TUI (default if no command given)
+    Tui,
+
+    /// Play stream/movie/episode by ID
+    Play {
+        /// Stream/Movie/Series ID
+        id: u32,
+        /// Content type (live, movie, series)
+        #[arg(short = 't', long)]
+        r#type: Option<String>,
+        /// Play in detached window
+        #[arg(short, long)]
+        detached: bool,
+    },
+
+    /// Search content across providers
+    Search {
+        /// Search query
+        query: String,
+        /// Content type to search (live, movie, series)
+        #[arg(short = 't', long)]
+        r#type: Option<String>,
+        /// Output format (text, json, m3u)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+    },
+
+    /// List streams/movies/series
+    #[command(subcommand)]
+    List(ListSubCommand),
+
+    /// Get detailed information about content
+    Info {
+        /// Content ID
+        id: u32,
+        /// Content type (live, movie, series)
+        #[arg(short = 't', long)]
+        r#type: String,
+        /// Output format (text, json)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+    },
+
+    /// Get stream URL
+    Url {
+        /// Content ID
+        id: u32,
+        /// Content type (live, movie, series)
+        #[arg(short = 't', long)]
+        r#type: String,
+    },
+
+    /// Manage favorites
+    #[command(subcommand)]
+    Fav(FavCommand),
+
+    /// Manage cache
+    #[command(subcommand)]
+    Cache(CacheSubCommand),
+
+    /// Manage providers
+    #[command(subcommand)]
+    Providers(ProvidersSubCommand),
+
+    /// Execute raw API calls
+    #[command(subcommand)]
+    Api(ApiCommand),
+
+    /// Interactively add a new provider
     AddProvider,
-    /// Execute raw API calls against the Xtream API
-    Api {
-        /// Provider name to use (if not specified, will prompt)
-        #[arg(short, long, global = true)]
-        provider: Option<String>,
-        #[command(subcommand)]
-        command: ApiCommands,
+}
+
+#[derive(Subcommand)]
+enum ListSubCommand {
+    /// List live TV streams
+    Live {
+        /// Category ID for filtering
+        #[arg(long)]
+        category: Option<String>,
+        /// Output format (text, json, m3u)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+        /// Limit number of results
+        #[arg(short, long)]
+        limit: Option<usize>,
+    },
+    /// List movies/VOD
+    Movie {
+        /// Category ID for filtering
+        #[arg(long)]
+        category: Option<String>,
+        /// Output format (text, json, m3u)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+        /// Limit number of results
+        #[arg(short, long)]
+        limit: Option<usize>,
+    },
+    /// List movies/VOD (alias for movie)
+    Movies {
+        /// Category ID for filtering
+        #[arg(long)]
+        category: Option<String>,
+        /// Output format (text, json, m3u)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+        /// Limit number of results
+        #[arg(short, long)]
+        limit: Option<usize>,
+    },
+    /// List movies/VOD (alias for movie)
+    Vod {
+        /// Category ID for filtering
+        #[arg(long)]
+        category: Option<String>,
+        /// Output format (text, json, m3u)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+        /// Limit number of results
+        #[arg(short, long)]
+        limit: Option<usize>,
+    },
+    /// List TV series
+    Series {
+        /// Category ID for filtering
+        #[arg(long)]
+        category: Option<String>,
+        /// Output format (text, json, m3u)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+        /// Limit number of results
+        #[arg(short, long)]
+        limit: Option<usize>,
+    },
+    /// List TV series (alias for series)
+    Tv {
+        /// Category ID for filtering
+        #[arg(long)]
+        category: Option<String>,
+        /// Output format (text, json, m3u)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+        /// Limit number of results
+        #[arg(short, long)]
+        limit: Option<usize>,
     },
 }
 
 #[derive(Subcommand)]
-#[allow(clippy::enum_variant_names)]
-enum ApiCommands {
-    /// Get user account information
-    #[command(name = "get-user-info")]
-    GetUserInfo,
-    /// Get live stream categories
-    #[command(name = "get-live-categories")]
-    GetLiveCategories,
+enum FavCommand {
+    /// List favorites
+    List {
+        /// Output format (text, json, m3u)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+    },
+    /// Add to favorites
+    Add {
+        /// Content ID
+        id: u32,
+        /// Content type (live, movie, series)
+        #[arg(short = 't', long)]
+        r#type: String,
+        /// Optional name override
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+    /// Remove from favorites
+    Remove {
+        /// Content ID
+        id: u32,
+    },
+}
+
+#[derive(Subcommand)]
+enum CacheSubCommand {
+    /// Refresh cache
+    Refresh,
+    /// Clear cache
+    Clear,
+}
+
+#[derive(Subcommand)]
+enum ProvidersSubCommand {
+    /// List configured providers
+    List {
+        /// Output format (text, json)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+    },
+    /// Test provider connections
+    Test {
+        /// Optional provider name to test
+        name: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ApiCommand {
+    /// Get user info
+    UserInfo,
+    /// Get live categories
+    LiveCategories,
     /// Get VOD categories
-    #[command(name = "get-vod-categories")]
-    GetVodCategories,
+    VodCategories,
     /// Get series categories
-    #[command(name = "get-series-categories")]
-    GetSeriesCategories,
+    SeriesCategories,
     /// Get live streams
-    #[command(name = "get-live-streams")]
-    GetLiveStreams {
-        /// Optional category ID for filtered results
+    LiveStreams {
         #[arg(short, long)]
         category: Option<String>,
     },
     /// Get VOD streams
-    #[command(name = "get-vod-streams")]
-    GetVodStreams {
-        /// Optional category ID for filtered results
+    VodStreams {
         #[arg(short, long)]
         category: Option<String>,
     },
-    /// Get series list
-    #[command(name = "get-series")]
-    GetSeries {
-        /// Optional category ID for filtered results
+    /// Get series
+    Series {
         #[arg(short, long)]
         category: Option<String>,
     },
-    /// Get detailed series information
-    #[command(name = "get-series-info")]
-    GetSeriesInfo {
-        /// Series ID
-        id: u32,
-    },
-    /// Get detailed VOD information
-    #[command(name = "get-vod-info")]
-    GetVodInfo {
-        /// VOD ID
-        id: u32,
-    },
-}
-
-async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result<()> {
-    if providers.is_empty() {
-        tracing::error!("No providers configured. Please check your config file.");
-        return Ok(());
-    }
-
-    // Check if rofi is available - just try to run it, don't worry about warnings
-    if !Command::new("rofi")
-        .arg("--help")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-    {
-        tracing::error!("'rofi' command not found or not working. Please install rofi.");
-        return Ok(());
-    }
-
-    // Collect favourites from all providers with provider info
-    #[derive(Clone)]
-    struct FavouriteWithProvider {
-        favourite: FavouriteStream,
-        provider_name: Option<String>,
-        provider_config: ProviderConfig,
-    }
-
-    let mut all_favourites = Vec::new();
-
-    tracing::info!("Loading favourites from {} provider(s)...", providers.len());
-
-    for provider in &providers {
-        tracing::info!(
-            "Connecting to provider: {}",
-            provider.name.as_ref().unwrap_or(&provider.url)
-        );
-
-        let api = XTreamAPI::new(
-            provider.url.clone(),
-            provider.username.clone(),
-            provider.password.clone(),
-            provider.name.clone(),
-        )?;
-
-        // Get favourites from this provider using the new favourites manager
-        let provider_favourites = match api.favourites_manager.get_favourites(&api.provider_hash) {
-            Ok(favs) => {
-                if !favs.is_empty() {
-                    tracing::info!(
-                        "Loaded {} favourites from {}",
-                        favs.len(),
-                        provider.name.as_ref().unwrap_or(&provider.url)
-                    );
-                }
-                favs
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "Error loading favourites from {}: {}",
-                    provider.name.as_ref().unwrap_or(&provider.url),
-                    e
-                );
-                Vec::new()
-            }
-        };
-
-        // Store favourites with their provider info
-        for favourite in provider_favourites {
-            all_favourites.push(FavouriteWithProvider {
-                favourite,
-                provider_name: provider.name.clone(),
-                provider_config: provider.clone(),
-            });
-        }
-    }
-
-    let favourites = all_favourites;
-
-    if favourites.is_empty() {
-        tracing::info!("No favourites found. Use the interactive menu to add favourites first.");
-        return Ok(());
-    }
-
-    // Prepare rofi input: format favourites for display with provider names
-    let mut rofi_input = String::new();
-    for fav_with_provider in &favourites {
-        // Include provider name for clarity when multiple providers have favourites
-        let provider_name = fav_with_provider
-            .provider_name
-            .as_ref()
-            .map(|name| format!(" [{}]", name))
-            .unwrap_or_default();
-        rofi_input.push_str(&format!(
-            "{}{}\n",
-            fav_with_provider.favourite.name, provider_name
-        ));
-    }
-
-    // Launch rofi to select a favourite
-    let mut rofi_cmd = Command::new("rofi");
-    rofi_cmd
-        .arg("-dmenu")
-        .arg("-hover-select")
-        .arg("-me-select-entry")
-        .arg("")
-        .arg("-me-accept-entry")
-        .arg("MousePrimary")
-        .arg("-i") // case insensitive
-        .arg("-p")
-        .arg("Select favourite stream:")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut rofi_process = rofi_cmd.spawn()?;
-
-    // Write favourites to rofi's stdin
-    if let Some(stdin) = rofi_process.stdin.as_mut() {
-        use std::io::Write;
-        stdin.write_all(rofi_input.as_bytes())?;
-    }
-
-    let output = rofi_process.wait_with_output()?;
-
-    if !output.status.success() {
-        // Check if there's stderr output to help debug
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.is_empty() {
-            tracing::error!("rofi error: {}", stderr.trim());
-        } else {
-            tracing::info!("User cancelled selection or rofi exited");
-        }
-        return Ok(());
-    }
-
-    let selected_display = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-    // Find the selected favourite by matching the display name
-    let mut selected_item = None;
-    for fav_with_provider in &favourites {
-        let provider_name = fav_with_provider
-            .provider_name
-            .as_ref()
-            .map(|name| format!(" [{}]", name))
-            .unwrap_or_default();
-        let display_name = format!("{}{}", fav_with_provider.favourite.name, provider_name);
-
-        if display_name == selected_display {
-            selected_item = Some(fav_with_provider);
-            break;
-        }
-    }
-
-    if let Some(selected_item) = selected_item {
-        // Create API for the selected provider to get stream URL
-        let api = XTreamAPI::new(
-            selected_item.provider_config.url.clone(),
-            selected_item.provider_config.username.clone(),
-            selected_item.provider_config.password.clone(),
-            selected_item.provider_config.name.clone(),
-        )?;
-
-        // Get the stream URL and start playing in background
-        let stream_url = api.get_stream_url(
-            selected_item.favourite.stream_id,
-            &selected_item.favourite.stream_type,
-            None,
-        );
-        tracing::info!("Starting: {}", selected_item.favourite.name);
-
-        // Start mpv in background and exit immediately
-        // Use the async play method directly since we're already in async context
-        player.play_detached(&stream_url).await?;
-        tracing::info!("Player started in background");
-
-        // Small delay to ensure MPV is fully detached before we exit
-        // This helps when launched from desktop files
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    } else {
-        tracing::error!("Selected favourite not found: {}", selected_display);
-    }
-
-    Ok(())
-}
-
-async fn run_api_command(
-    providers: Vec<ProviderConfig>,
-    provider_name: Option<String>,
-    command: ApiCommands,
-) -> Result<()> {
-    // Select provider
-    let provider = if let Some(name) = provider_name {
-        // Find provider by name
-        providers
-            .into_iter()
-            .find(|p| p.name.as_ref() == Some(&name))
-            .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", name))?
-    } else if providers.len() == 1 {
-        // Use the only provider
-        providers.into_iter().next().unwrap()
-    } else if providers.is_empty() {
-        anyhow::bail!("No providers configured");
-    } else {
-        // Show selection menu
-        let provider_names: Vec<String> = providers
-            .iter()
-            .map(|p| {
-                p.name
-                    .clone()
-                    .unwrap_or_else(|| format!("{}@{}", p.username, p.url))
-            })
-            .collect();
-
-        let selection = Select::new("Select provider:", provider_names).prompt()?;
-
-        providers
-            .into_iter()
-            .find(|p| {
-                let name = p
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| format!("{}@{}", p.username, p.url));
-                name == selection
-            })
-            .unwrap()
-    };
-
-    // Create API client
-    let mut api = XTreamAPI::new(
-        provider.url.clone(),
-        provider.username.clone(),
-        provider.password.clone(),
-        provider.name.clone(),
-    )?;
-
-    // Execute the API call
-    let result = match command {
-        ApiCommands::GetUserInfo => {
-            let info = api.get_user_info().await?;
-            serde_json::to_value(info)?
-        }
-        ApiCommands::GetLiveCategories => {
-            let categories = api.get_live_categories().await?;
-            serde_json::to_value(categories)?
-        }
-        ApiCommands::GetVodCategories => {
-            let categories = api.get_vod_categories().await?;
-            serde_json::to_value(categories)?
-        }
-        ApiCommands::GetSeriesCategories => {
-            let categories = api.get_series_categories().await?;
-            serde_json::to_value(categories)?
-        }
-        ApiCommands::GetLiveStreams { category } => {
-            let streams = api.get_live_streams(category.as_deref()).await?;
-            serde_json::to_value(streams)?
-        }
-        ApiCommands::GetVodStreams { category } => {
-            let streams = api.get_vod_streams(category.as_deref()).await?;
-            serde_json::to_value(streams)?
-        }
-        ApiCommands::GetSeries { category } => {
-            let series = api.get_series(category.as_deref()).await?;
-            serde_json::to_value(series)?
-        }
-        ApiCommands::GetSeriesInfo { id } => {
-            let info = api.get_series_info(id).await?;
-            serde_json::to_value(info)?
-        }
-        ApiCommands::GetVodInfo { id } => {
-            let info = api.get_vod_info(id).await?;
-            serde_json::to_value(info)?
-        }
-    };
-
-    // Pretty print the JSON result
-    let pretty_json = serde_json::to_string_pretty(&result)?;
-    println!("{}", pretty_json);
-
-    Ok(())
+    /// Get series info
+    SeriesInfo { id: u32 },
+    /// Get VOD info
+    VodInfo { id: u32 },
 }
 
 async fn add_provider_interactively(config_path: PathBuf) -> Result<()> {
+    use std::io::{self, Write};
+
     println!("Adding a new Xtreme API provider to your configuration");
     println!("Please provide the following information:");
-    println!();
 
-    // Prompt for provider name
-    let name = Text::new("Provider name (user-friendly identifier):")
-        .with_help_message("This is just for your reference, e.g. 'My IPTV Service'")
-        .prompt()?;
+    print!("Provider Name (e.g., 'MyIPTV'): ");
+    io::stdout().flush()?;
+    let mut name = String::new();
+    io::stdin().read_line(&mut name)?;
+    let name = name.trim().to_string();
 
-    // Validate name is not empty
-    if name.trim().is_empty() {
-        anyhow::bail!("Provider name cannot be empty");
+    print!("Server URL (e.g., http://example.com:8080): ");
+    io::stdout().flush()?;
+    let mut url = String::new();
+    io::stdin().read_line(&mut url)?;
+    let url = url.trim().to_string();
+
+    print!("Username: ");
+    io::stdout().flush()?;
+    let mut username = String::new();
+    io::stdin().read_line(&mut username)?;
+    let username = username.trim().to_string();
+
+    print!("Password: ");
+    io::stdout().flush()?;
+    let mut password = String::new();
+    io::stdin().read_line(&mut password)?;
+    let password = password.trim().to_string();
+
+    // Test the connection
+    println!("\nTesting connection...");
+    let mut test_api = XTreamAPI::new(
+        url.clone(),
+        username.clone(),
+        password.clone(),
+        Some(name.clone()),
+    )?;
+
+    match test_api.get_user_info().await {
+        Ok(info) => {
+            println!("✓ Connection successful!");
+            println!("  Account: {}", info.username);
+            println!("  Status: {}", info.status);
+        }
+        Err(e) => {
+            eprintln!("✗ Connection failed: {}", e);
+            eprintln!("Provider will be added anyway, but please check your credentials.");
+        }
     }
 
-    // Prompt for URL
-    let url = Text::new("Xtreme API URL:")
-        .with_help_message("e.g. https://your-server.com:port/player_api.php")
-        .prompt()?;
-
-    // Validate URL is not empty and looks like a URL
-    if url.trim().is_empty() {
-        anyhow::bail!("URL cannot be empty");
-    }
-
-    // Basic URL validation
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        anyhow::bail!("URL must start with http:// or https://");
-    }
-
-    // Prompt for username
-    let username = Text::new("Username:").prompt()?;
-
-    // Validate username is not empty
-    if username.trim().is_empty() {
-        anyhow::bail!("Username cannot be empty");
-    }
-
-    // Prompt for password
-    let password = Password::new("Password:").without_confirmation().prompt()?;
-
-    // Validate password is not empty
-    if password.trim().is_empty() {
-        anyhow::bail!("Password cannot be empty");
-    }
-
-    // Create new provider config
-    let new_provider = ProviderConfig {
-        name: Some(name.trim().to_string()),
-        url: url.trim().to_string(),
-        username: username.trim().to_string(),
-        password: password.trim().to_string(),
-    };
-
-    // Load existing config or create new one
+    // Load existing config or create new
     let mut config = if config_path.exists() {
         Config::load(&config_path)?
     } else {
-        // Ensure config directory exists
-        let _ = Config::ensure_config_dir();
         Config::default()
     };
 
     // Add the new provider
-    config.providers.push(new_provider);
+    let provider = ProviderConfig {
+        name: Some(name.clone()),
+        url,
+        username,
+        password,
+    };
+
+    config.providers.push(provider);
 
     // Save the updated config
     config.save(&config_path)?;
 
-    println!();
-    println!("✓ Provider '{}' added successfully!", name.trim());
-    println!("Configuration saved to: {}", config_path.display());
-    println!();
-    println!("You can now use this provider in the IPTV application.");
+    println!(
+        "\n✓ Provider '{}' has been added to {}",
+        name,
+        config_path.display()
+    );
 
+    Ok(())
+}
+
+async fn run_api_command(_provider: &str, api: &mut XTreamAPI, cmd: ApiCommand) -> Result<()> {
+    let result = match cmd {
+        ApiCommand::UserInfo => serde_json::to_value(api.get_user_info().await?)?,
+        ApiCommand::LiveCategories => serde_json::to_value(api.get_live_categories().await?)?,
+        ApiCommand::VodCategories => serde_json::to_value(api.get_vod_categories().await?)?,
+        ApiCommand::SeriesCategories => serde_json::to_value(api.get_series_categories().await?)?,
+        ApiCommand::LiveStreams { category } => {
+            serde_json::to_value(api.get_live_streams(category.as_deref()).await?)?
+        }
+        ApiCommand::VodStreams { category } => {
+            serde_json::to_value(api.get_vod_streams(category.as_deref()).await?)?
+        }
+        ApiCommand::Series { category } => {
+            serde_json::to_value(api.get_series(category.as_deref()).await?)?
+        }
+        ApiCommand::SeriesInfo { id } => serde_json::to_value(api.get_series_info(id).await?)?,
+        ApiCommand::VodInfo { id } => serde_json::to_value(api.get_vod_info(id).await?)?,
+    };
+
+    println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }
 
@@ -469,103 +384,217 @@ async fn add_provider_interactively(config_path: PathBuf) -> Result<()> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize tracing
-    let filter = if cli.verbose || cli.debug_log {
-        EnvFilter::new("debug,reqwest=warn,h2=warn,hyper=warn")
-    } else {
-        EnvFilter::new("info,reqwest=warn,h2=warn,hyper=warn")
-    };
-
-    if cli.debug_log && cli.tui {
-        // Setup file logging for TUI debug mode
-        let debug_file = File::create("iptv_debug.log")?;
-
-        // In TUI mode with debug, only log to file
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_writer(debug_file)
+    // Setup logging
+    if cli.debug_log {
+        let file = File::create("iptv_debug.log")?;
+        let file_layer = tracing_subscriber::fmt::layer()
+            .with_writer(file)
             .with_ansi(false)
-            .with_target(true)
-            .with_line_number(true)
-            .init();
-    } else {
-        // Normal logging to console
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_target(false)
             .with_level(true)
-            .without_time()
+            .with_thread_ids(true)
+            .with_thread_names(true)
+            .with_file(true)
+            .with_line_number(true);
+
+        tracing_subscriber::registry()
+            .with(file_layer)
+            .with(
+                EnvFilter::from_default_env()
+                    .add_directive("iptv=debug".parse()?)
+                    .add_directive("hyper_util=error".parse()?),
+            )
+            .init();
+    } else if cli.verbose {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                EnvFilter::from_default_env()
+                    .add_directive(tracing::Level::DEBUG.into())
+                    .add_directive("hyper_util=error".parse()?),
+            )
+            .init();
+    } else if std::env::var("RUST_LOG").is_ok() {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                EnvFilter::from_default_env().add_directive("hyper_util=error".parse()?),
+            )
             .init();
     }
 
-    // Determine config file path
+    // Load configuration
     let config_path = cli.config.unwrap_or_else(|| {
-        // First check for config.toml in current directory
-        let local_config = std::env::current_dir()
-            .unwrap_or_default()
-            .join("config.toml");
-
-        if local_config.exists() {
-            return local_config;
-        }
-
-        // Check for ~/.config/iptv/config.toml
-        if let Some(config_path) = Config::default_config_path()
-            && config_path.exists()
-        {
-            return config_path;
-        }
-
-        // Default to new location
-        Config::default_config_path().unwrap_or(local_config)
+        dirs::config_dir()
+            .map(|p| p.join("iptv").join("config.toml"))
+            .unwrap_or_else(|| PathBuf::from("config.toml"))
     });
 
-    // Load configuration
     let config = if config_path.exists() {
         Config::load(&config_path)?
     } else {
-        // Ensure config directory exists for new location
-        let _ = Config::ensure_config_dir();
-
-        eprintln!("Config file not found at: {}", config_path.display());
-        eprintln!("Expected locations:");
-        eprintln!("  1. ./config.toml (current directory)");
-        eprintln!("  2. ~/.config/iptv/config.toml (recommended)");
-        eprintln!();
-        eprintln!("Creating example config at: config.example.toml");
-        eprintln!("Please copy and edit it to one of the locations above");
-
-        let example_config = Config::default();
-        example_config.save("config.example.toml")?;
-
-        return Ok(());
+        eprintln!("No configuration file found at: {}", config_path.display());
+        eprintln!("Run 'iptv add-provider' to create one.");
+        Config::default()
     };
 
-    // Initialize player (automatically uses MPV if available)
+    // Get provider from env var if not specified
+    let selected_provider = cli.provider.or_else(|| std::env::var("IPTV_PROVIDER").ok());
+
+    // Create command context
+    let context = CommandContext::new(config.providers.clone(), selected_provider, cli.all);
+
+    // Create player
     let player = Player::new();
 
-    // Handle subcommands
+    // Execute command
     match cli.command {
-        Some(Commands::Rofi) => {
-            run_rofi_menu(config.providers, player).await?;
+        Some(Commands::Tui) | None => {
+            // Launch TUI
+            if config.providers.is_empty() {
+                eprintln!("No providers configured. Run 'iptv add-provider' to add one.");
+                return Ok(());
+            }
+            iptv::run_tui(config, player).await?;
         }
+
+        Some(Commands::Play {
+            id,
+            r#type,
+            detached,
+        }) => {
+            let content_type = r#type.map(|t| ContentType::from_str(&t)).transpose()?;
+            let cmd = PlayCommand {
+                id,
+                content_type,
+                detached,
+            };
+            cmd.execute(context, player).await?;
+        }
+
+        Some(Commands::Search {
+            query,
+            r#type,
+            format,
+        }) => {
+            let content_type = r#type.map(|t| ContentType::from_str(&t)).transpose()?;
+            let output_format = OutputFormat::from_str(&format)?;
+            let cmd = SearchCommand {
+                query,
+                content_type,
+                format: output_format,
+            };
+            cmd.execute(context).await?;
+        }
+
+        Some(Commands::List(list_cmd)) => {
+            let (content_type, category, format, limit) = match list_cmd {
+                ListSubCommand::Live {
+                    category,
+                    format,
+                    limit,
+                } => (ContentType::Live, category, format, limit),
+                ListSubCommand::Movie {
+                    category,
+                    format,
+                    limit,
+                }
+                | ListSubCommand::Movies {
+                    category,
+                    format,
+                    limit,
+                }
+                | ListSubCommand::Vod {
+                    category,
+                    format,
+                    limit,
+                } => (ContentType::Movie, category, format, limit),
+                ListSubCommand::Series {
+                    category,
+                    format,
+                    limit,
+                }
+                | ListSubCommand::Tv {
+                    category,
+                    format,
+                    limit,
+                } => (ContentType::Series, category, format, limit),
+            };
+
+            let output_format = OutputFormat::from_str(&format)?;
+            let cmd = ListCommand {
+                content_type,
+                category,
+                format: output_format,
+                limit,
+            };
+            cmd.execute(context).await?;
+        }
+
+        Some(Commands::Info { id, r#type, format }) => {
+            let content_type = ContentType::from_str(&r#type)?;
+            let output_format = OutputFormat::from_str(&format)?;
+            let cmd = InfoCommand {
+                id,
+                content_type,
+                format: output_format,
+            };
+            cmd.execute(context).await?;
+        }
+
+        Some(Commands::Url { id, r#type }) => {
+            let (api, _) = context.get_single_provider().await?;
+            let url = api.get_stream_url(id, &r#type, None);
+            println!("{}", url);
+        }
+
+        Some(Commands::Fav(fav_cmd)) => {
+            let cmd = match fav_cmd {
+                FavCommand::List { format } => {
+                    let output_format = OutputFormat::from_str(&format)?;
+                    FavoritesCommand::List {
+                        format: output_format,
+                    }
+                }
+                FavCommand::Add { id, r#type, name } => {
+                    let content_type = ContentType::from_str(&r#type)?;
+                    FavoritesCommand::Add {
+                        id,
+                        content_type,
+                        name,
+                    }
+                }
+                FavCommand::Remove { id } => FavoritesCommand::Remove { id },
+            };
+            cmd.execute(context).await?;
+        }
+
+        Some(Commands::Cache(cache_cmd)) => {
+            let cmd = match cache_cmd {
+                CacheSubCommand::Refresh => CacheCommand::Refresh,
+                CacheSubCommand::Clear => CacheCommand::Clear,
+            };
+            cmd.execute(context).await?;
+        }
+
+        Some(Commands::Providers(providers_cmd)) => {
+            let cmd = match providers_cmd {
+                ProvidersSubCommand::List { format } => {
+                    let output_format = OutputFormat::from_str(&format)?;
+                    ProvidersCommand::List {
+                        format: output_format,
+                    }
+                }
+                ProvidersSubCommand::Test { name } => ProvidersCommand::Test { name },
+            };
+            cmd.execute(context).await?;
+        }
+
+        Some(Commands::Api(api_cmd)) => {
+            let (mut api, provider_name) = context.get_single_provider().await?;
+            eprintln!("Using provider: {}", provider_name);
+            run_api_command(&provider_name, &mut api, api_cmd).await?;
+        }
+
         Some(Commands::AddProvider) => {
             add_provider_interactively(config_path).await?;
-        }
-        Some(Commands::Api { provider, command }) => {
-            run_api_command(config.providers, provider, command).await?;
-        }
-        None => {
-            // Check if TUI mode is requested
-            if cli.tui {
-                // Run TUI mode
-                iptv::tui::run_tui(config.providers, player).await?;
-            } else {
-                // Initialize and run menu system
-                let mut menu_system =
-                    MenuSystem::new(config.providers, player, config.ui.page_size);
-                menu_system.run().await?;
-            }
         }
     }
 

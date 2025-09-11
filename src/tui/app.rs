@@ -1,7 +1,23 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
-use crate::cli::menu::ContentType;
+// ContentType moved to commands module, but we'll define it locally for now
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ContentType {
+    Live,
+    Movies,
+    Series,
+}
+
+impl std::fmt::Display for ContentType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContentType::Live => write!(f, "Live TV"),
+            ContentType::Movies => write!(f, "Movies"),
+            ContentType::Series => write!(f, "TV Series"),
+        }
+    }
+}
 use crate::config::ProviderConfig;
 use crate::player::Player;
 use crate::xtream_api::{
@@ -34,6 +50,20 @@ pub struct VodInfoState {
     pub saved_scroll: usize,
     pub saved_items: Vec<String>,
     pub content_scroll: usize, // scroll position for content display
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NavigationState {
+    pub selected_index: usize,
+    pub scroll_offset: usize,
+    pub search_query: String,
+    pub filtered_indices: Vec<usize>,
+}
+
+impl NavigationState {
+    pub fn new() -> Self {
+        Self::default()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +120,14 @@ pub struct App {
     cached_categories: HashMap<ContentType, Vec<Category>>,
     // Cache for streams by content type and category ID
     cached_streams: HashMap<(ContentType, String), Vec<Stream>>,
+    // Navigation state history for preserving selections when going back
+    provider_selection_state: NavigationState,
+    main_menu_state: NavigationState,
+    category_selection_states: HashMap<ContentType, NavigationState>,
+    stream_selection_states: HashMap<(ContentType, String), NavigationState>,
+    season_selection_state: NavigationState,
+    favourite_selection_state: NavigationState,
+    cross_provider_favourites_state: NavigationState,
 }
 
 impl App {
@@ -144,6 +182,13 @@ impl App {
             vod_info: None,
             cached_categories: HashMap::new(),
             cached_streams: HashMap::new(),
+            provider_selection_state: NavigationState::new(),
+            main_menu_state: NavigationState::new(),
+            category_selection_states: HashMap::new(),
+            stream_selection_states: HashMap::new(),
+            season_selection_state: NavigationState::new(),
+            favourite_selection_state: NavigationState::new(),
+            cross_provider_favourites_state: NavigationState::new(),
         }
     }
 
@@ -160,8 +205,7 @@ impl App {
             if !is_running {
                 // Return to main menu when player exits
                 self.state = AppState::MainMenu;
-                self.selected_index = 0;
-                self.scroll_offset = 0;
+                self.restore_navigation_state(&AppState::MainMenu);
                 self.update_main_menu_items();
 
                 if let Some(message) = exit_message {
@@ -306,10 +350,11 @@ impl App {
             return None;
         }
 
-        match &self.state {
+        match self.state.clone() {
             AppState::Error(_) => {
                 if key.code == KeyCode::Enter || key.code == KeyCode::Esc {
                     self.state = AppState::MainMenu;
+                    self.restore_navigation_state(&AppState::MainMenu);
                     self.update_main_menu_items();
                 }
             }
@@ -323,9 +368,11 @@ impl App {
                 KeyCode::Enter => {
                     if self.selected_index == 0 {
                         // All Favourites selected
+                        self.save_current_navigation_state();
                         self.load_all_favourites().await;
                     } else if self.selected_index - 1 < self.providers.len() {
                         let provider = self.providers[self.selected_index - 1].clone();
+                        self.save_current_navigation_state();
                         self.connect_to_provider(&provider).await;
                     }
                 }
@@ -340,13 +387,14 @@ impl App {
                 KeyCode::Home | KeyCode::Char('H') => self.move_selection_home(),
                 KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Enter => {
+                    self.save_current_navigation_state();
                     self.handle_main_menu_selection().await;
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
                     if self.providers.len() > 1 {
+                        self.save_current_navigation_state();
                         self.state = AppState::ProviderSelection;
-                        self.selected_index = 0;
-                        self.scroll_offset = 0;
+                        self.restore_navigation_state(&AppState::ProviderSelection);
                         self.update_provider_items();
                     } else {
                         return Some(Action::Quit);
@@ -363,20 +411,21 @@ impl App {
                 KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Char('r') => {
                     // Force refresh categories
-                    let ct = content_type.clone();
+                    let ct = content_type;
                     self.add_log("Refreshing categories...".to_string());
                     self.load_categories_internal(ct, true).await;
                 }
                 KeyCode::Enter => {
                     if self.selected_index < self.categories.len() {
                         let category = self.categories[self.selected_index].clone();
-                        self.load_streams(content_type.clone(), category).await;
+                        self.save_current_navigation_state();
+                        self.load_streams(content_type, category).await;
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
+                    self.save_current_navigation_state();
                     self.state = AppState::MainMenu;
-                    self.selected_index = 0;
-                    self.scroll_offset = 0;
+                    self.restore_navigation_state(&AppState::MainMenu);
                     self.update_main_menu_items();
                 }
                 _ => {}
@@ -390,7 +439,7 @@ impl App {
                 KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Char('r') => {
                     // Force refresh streams
-                    let ct = content_type.clone();
+                    let ct = content_type;
                     let cat = category.clone();
                     self.add_log("Refreshing streams...".to_string());
                     self.load_streams_internal(ct, cat, true).await;
@@ -408,6 +457,7 @@ impl App {
                         let stream = self.streams[self.selected_index].clone();
                         match content_type {
                             ContentType::Series => {
+                                self.save_current_navigation_state();
                                 self.load_seasons(stream).await;
                             }
                             ContentType::Movies => {
@@ -450,8 +500,12 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
-                    // Go back to category selection and reload categories
-                    self.load_categories(content_type.clone()).await;
+                    // Go back to category selection
+                    self.save_current_navigation_state();
+                    self.state = AppState::CategorySelection(content_type);
+                    self.restore_navigation_state(&AppState::CategorySelection(content_type));
+                    // Reload categories to ensure UI is in sync
+                    self.load_categories(content_type).await;
                 }
                 _ => {}
             },
@@ -679,12 +733,14 @@ impl App {
                 KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Enter => {
                     if self.selected_index < self.seasons.len() {
-                        let season = &self.seasons[self.selected_index];
-                        self.load_episodes(series.clone(), season.clone()).await;
+                        let season = self.seasons[self.selected_index].clone();
+                        self.save_current_navigation_state();
+                        self.load_episodes(series.clone(), season).await;
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
-                    // Go back to stream selection and reload series
+                    // Go back to stream selection
+                    self.save_current_navigation_state();
                     let category = self
                         .categories
                         .iter()
@@ -700,6 +756,11 @@ impl App {
                             parent_id: None,
                         });
 
+                    self.state = AppState::StreamSelection(ContentType::Series, category.clone());
+                    self.restore_navigation_state(&AppState::StreamSelection(
+                        ContentType::Series,
+                        category.clone(),
+                    ));
                     self.load_streams(ContentType::Series, category).await;
                 }
                 _ => {}
@@ -725,9 +786,9 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
+                    self.save_current_navigation_state();
                     self.state = AppState::SeasonSelection(series.clone());
-                    self.selected_index = 0;
-                    self.scroll_offset = 0;
+                    self.restore_navigation_state(&AppState::SeasonSelection(series.clone()));
                 }
                 _ => {}
             },
@@ -844,9 +905,9 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
+                    self.save_current_navigation_state();
                     self.state = AppState::ProviderSelection;
-                    self.selected_index = 0;
-                    self.scroll_offset = 0;
+                    self.restore_navigation_state(&AppState::ProviderSelection);
                     self.update_provider_items();
                 }
                 KeyCode::Char('/') => {
@@ -881,9 +942,9 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
+                    self.save_current_navigation_state();
                     self.state = AppState::MainMenu;
-                    self.selected_index = 0;
-                    self.scroll_offset = 0;
+                    self.restore_navigation_state(&AppState::MainMenu);
                     self.update_main_menu_items();
                 }
                 _ => {}
@@ -1057,8 +1118,7 @@ impl App {
                 self.cached_categories.clear();
                 self.cached_streams.clear();
                 self.state = AppState::MainMenu;
-                self.selected_index = 0;
-                self.scroll_offset = 0;
+                self.restore_navigation_state(&AppState::MainMenu);
                 self.update_main_menu_items();
                 self.add_log("Successfully connected to provider".to_string());
             }
@@ -1111,7 +1171,7 @@ impl App {
     async fn load_categories_internal(&mut self, content_type: ContentType, force_refresh: bool) {
         // Check cache first if not forcing refresh
         if !force_refresh && let Some(cached) = self.cached_categories.get(&content_type) {
-            let ct = content_type.clone();
+            let ct = content_type;
             self.categories = cached.clone();
             self.add_log(format!("Using cached {} categories", ct));
             self.items = self
@@ -1120,9 +1180,8 @@ impl App {
                 .map(|c| c.category_name.clone())
                 .collect();
             self.reset_filter();
-            self.state = AppState::CategorySelection(content_type.clone());
-            self.selected_index = 0;
-            self.scroll_offset = 0;
+            self.state = AppState::CategorySelection(content_type);
+            self.restore_navigation_state(&AppState::CategorySelection(content_type));
             return;
         }
 
@@ -1148,7 +1207,7 @@ impl App {
 
                     // Store in cache
                     self.cached_categories
-                        .insert(content_type.clone(), categories.clone());
+                        .insert(content_type, categories.clone());
 
                     self.categories = categories;
                     self.items = self
@@ -1158,8 +1217,7 @@ impl App {
                         .collect();
                     self.reset_filter();
                     self.state = AppState::CategorySelection(content_type);
-                    self.selected_index = 0;
-                    self.scroll_offset = 0;
+                    self.restore_navigation_state(&AppState::CategorySelection(content_type));
                     self.add_log(format!("Loaded {} categories", self.categories.len()));
                 }
                 Err(e) => {
@@ -1182,7 +1240,7 @@ impl App {
         force_refresh: bool,
     ) {
         // Check cache first if not forcing refresh
-        let cache_key = (content_type.clone(), category.category_id.clone());
+        let cache_key = (content_type, category.category_id.clone());
         if !force_refresh && let Some(cached) = self.cached_streams.get(&cache_key) {
             let cat_name = category.category_name.clone();
             self.streams = cached.clone();
@@ -1212,9 +1270,8 @@ impl App {
                 .collect();
 
             self.reset_filter();
-            self.state = AppState::StreamSelection(content_type, category);
-            self.selected_index = 0;
-            self.scroll_offset = 0;
+            self.state = AppState::StreamSelection(content_type, category.clone());
+            self.restore_navigation_state(&AppState::StreamSelection(content_type, category));
             return;
         }
 
@@ -1365,9 +1422,11 @@ impl App {
                         .collect();
 
                     self.reset_filter();
-                    self.state = AppState::StreamSelection(content_type, category);
-                    self.selected_index = 0;
-                    self.scroll_offset = 0;
+                    self.state = AppState::StreamSelection(content_type, category.clone());
+                    self.restore_navigation_state(&AppState::StreamSelection(
+                        content_type,
+                        category,
+                    ));
                     self.add_log(format!("Loaded {} streams", self.streams.len()));
                 }
                 Err(e) => {
@@ -1408,9 +1467,8 @@ impl App {
                         .collect();
                     self.reset_filter();
 
-                    self.state = AppState::SeasonSelection(series);
-                    self.selected_index = 0;
-                    self.scroll_offset = 0;
+                    self.state = AppState::SeasonSelection(series.clone());
+                    self.restore_navigation_state(&AppState::SeasonSelection(series));
                     self.add_log(format!("Loaded {} seasons", self.seasons.len()));
                 }
                 Err(e) => {
@@ -1442,7 +1500,8 @@ impl App {
                                 .collect();
                             self.reset_filter();
 
-                            self.state = AppState::EpisodeSelection(series, season);
+                            self.state = AppState::EpisodeSelection(series.clone(), season);
+                            // Episodes are a new navigation level, so we start fresh
                             self.selected_index = 0;
                             self.scroll_offset = 0;
                             self.add_log(format!("Loaded {} episodes", self.episodes.len()));
@@ -1524,8 +1583,7 @@ impl App {
         self.reset_filter();
 
         self.state = AppState::CrossProviderFavourites;
-        self.selected_index = 0;
-        self.scroll_offset = 0;
+        self.restore_navigation_state(&AppState::CrossProviderFavourites);
 
         self.add_log(format!("Loaded {} favourites", self.items.len()));
     }
@@ -1546,8 +1604,7 @@ impl App {
                     self.reset_filter();
 
                     self.state = AppState::FavouriteSelection;
-                    self.selected_index = 0;
-                    self.scroll_offset = 0;
+                    self.restore_navigation_state(&AppState::FavouriteSelection);
                     self.add_log(format!("Loaded {} favourites", self.favourites.len()));
                 }
                 Err(e) => {
@@ -2040,6 +2097,68 @@ impl App {
         }
     }
 
+    fn save_current_navigation_state(&mut self) {
+        let nav_state = NavigationState {
+            selected_index: self.selected_index,
+            scroll_offset: self.scroll_offset,
+            search_query: self.search_query.clone(),
+            filtered_indices: self.filtered_indices.clone(),
+        };
+
+        match self.state.clone() {
+            AppState::ProviderSelection => {
+                self.provider_selection_state = nav_state;
+            }
+            AppState::MainMenu => {
+                self.main_menu_state = nav_state;
+            }
+            AppState::CategorySelection(content_type) => {
+                self.category_selection_states
+                    .insert(content_type, nav_state);
+            }
+            AppState::StreamSelection(content_type, category) => {
+                self.stream_selection_states
+                    .insert((content_type, category.category_id.clone()), nav_state);
+            }
+            AppState::SeasonSelection(_) => {
+                self.season_selection_state = nav_state;
+            }
+            AppState::FavouriteSelection => {
+                self.favourite_selection_state = nav_state;
+            }
+            AppState::CrossProviderFavourites => {
+                self.cross_provider_favourites_state = nav_state;
+            }
+            _ => {}
+        }
+    }
+
+    fn restore_navigation_state(&mut self, for_state: &AppState) {
+        let nav_state = match for_state {
+            AppState::ProviderSelection => self.provider_selection_state.clone(),
+            AppState::MainMenu => self.main_menu_state.clone(),
+            AppState::CategorySelection(content_type) => self
+                .category_selection_states
+                .get(content_type)
+                .cloned()
+                .unwrap_or_else(NavigationState::new),
+            AppState::StreamSelection(content_type, category) => self
+                .stream_selection_states
+                .get(&(*content_type, category.category_id.clone()))
+                .cloned()
+                .unwrap_or_else(NavigationState::new),
+            AppState::SeasonSelection(_) => self.season_selection_state.clone(),
+            AppState::FavouriteSelection => self.favourite_selection_state.clone(),
+            AppState::CrossProviderFavourites => self.cross_provider_favourites_state.clone(),
+            _ => NavigationState::new(),
+        };
+
+        self.selected_index = nav_state.selected_index;
+        self.scroll_offset = nav_state.scroll_offset;
+        self.search_query = nav_state.search_query;
+        self.filtered_indices = nav_state.filtered_indices;
+    }
+
     fn stop_playing(&mut self) {
         // Stop the player process
         let player = self.player.clone();
@@ -2048,8 +2167,8 @@ impl App {
         });
 
         self.state = AppState::MainMenu;
-        self.selected_index = 0;
-        self.scroll_offset = 0;
+        // Restore main menu navigation state
+        self.restore_navigation_state(&AppState::MainMenu);
         self.update_main_menu_items();
         self.add_log("Stopped playback".to_string());
     }
@@ -2070,6 +2189,7 @@ impl App {
                 self.add_log(format!("Cache refresh failed: {}", e));
             } else {
                 self.state = AppState::MainMenu;
+                self.restore_navigation_state(&AppState::MainMenu);
                 self.update_main_menu_items();
                 self.add_log("Cache refreshed successfully".to_string());
             }
@@ -2156,6 +2276,7 @@ impl App {
                 self.add_log(format!("Cache clear failed: {}", e));
             } else {
                 self.state = AppState::MainMenu;
+                self.restore_navigation_state(&AppState::MainMenu);
                 self.update_main_menu_items();
                 self.add_log("Cache cleared successfully".to_string());
             }
