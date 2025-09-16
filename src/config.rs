@@ -9,8 +9,6 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub providers: Vec<ProviderConfig>,
-    #[serde(default)]
-    pub ui: UiConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,24 +17,6 @@ pub struct ProviderConfig {
     pub url: String,
     pub username: String,
     pub password: String,
-}
-
-impl Default for UiConfig {
-    fn default() -> Self {
-        Self {
-            page_size: 20,
-            search_debounce_ms: 300,
-            filter_english_only_series: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UiConfig {
-    pub page_size: usize,
-    pub search_debounce_ms: u64,
-    #[serde(default)]
-    pub filter_english_only_series: bool,
 }
 
 impl Default for Config {
@@ -48,7 +28,6 @@ impl Default for Config {
                 username: "your-username".to_string(),
                 password: "your-password".to_string(),
             }],
-            ui: UiConfig::default(),
         }
     }
 }
