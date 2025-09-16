@@ -25,6 +25,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         ])
         .split(size);
 
+    // Update the visible height based on the content area size
+    app.update_visible_height(chunks[1].height as usize);
+
     // Draw header
     draw_header(frame, app, chunks[0]);
 
@@ -46,21 +49,32 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 }
 
 fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
-    let header_text = match &app.state {
-        AppState::ProviderSelection => "Select Provider",
-        AppState::MainMenu => "IPTV Player",
-        AppState::CategorySelection(content_type) => &format!("{} - Categories", content_type),
+    let base_text = match &app.state {
+        AppState::ProviderSelection => "Select Provider".to_string(),
+        AppState::MainMenu => "IPTV Player".to_string(),
+        AppState::CategorySelection(content_type) => format!("{} - Categories", content_type),
         AppState::StreamSelection(content_type, category) => {
-            &format!("{} - {}", content_type, category.category_name)
+            format!("{} - {}", content_type, category.category_name)
         }
-        AppState::SeasonSelection(series) => &series.name,
+        AppState::SeasonSelection(series) => series.name.clone(),
         AppState::EpisodeSelection(series, season) => {
-            &format!("{} - Season {}", series.name, season.season_number)
+            format!("{} - Season {}", series.name, season.season_number)
         }
-        AppState::VodInfo(_) => "VOD Info",
-        AppState::FavouriteSelection => "Favourites",
-        AppState::Playing(name) => &format!("Playing: {}", name),
-        _ => "IPTV Player",
+        AppState::VodInfo(_) => "VOD Info".to_string(),
+        AppState::FavouriteSelection => "Favourites".to_string(),
+        AppState::Playing(name) => format!("Playing: {}", name),
+        _ => "IPTV Player".to_string(),
+    };
+
+    let header_text = if let Some(provider_name) = &app.current_provider_name {
+        if matches!(app.state, AppState::ProviderSelection) {
+            // Don't show provider name on provider selection screen
+            base_text
+        } else {
+            format!("{} - {}", provider_name, base_text)
+        }
+    } else {
+        base_text
     };
 
     let header = Paragraph::new(header_text)
@@ -109,12 +123,24 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let title = if !app.search_query.is_empty() && !app.search_active {
-        format!(" Content (Filtered: \"{}\") ", app.search_query)
-    } else if app.search_active {
-        format!(" Content (Search: {}_) ", app.search_query)
+    let provider_prefix = if let Some(provider_name) = &app.current_provider_name {
+        format!("{} - ", provider_name)
     } else {
-        " Content ".to_string()
+        String::new()
+    };
+
+    let title = if !app.search_query.is_empty() && !app.search_active {
+        format!(
+            " {}Content (Filtered: \"{}\") ",
+            provider_prefix, app.search_query
+        )
+    } else if app.search_active {
+        format!(
+            " {}Content (Search: {}_) ",
+            provider_prefix, app.search_query
+        )
+    } else {
+        format!(" {}Content ", provider_prefix)
     };
 
     let block = Block::default()

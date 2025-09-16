@@ -98,7 +98,8 @@ async fn run_app(tui: &mut Tui, app: &mut App) -> Result<()> {
 
                         // Get provider name before mutable borrow
                         let provider_name = app
-                            .get_current_provider_name()
+                            .current_provider_name
+                            .clone()
                             .unwrap_or_else(|| "Unknown".to_string());
 
                         // Run the same cache refresh as CLI with progress enabled
