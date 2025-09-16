@@ -9,6 +9,16 @@ pub enum ContentType {
     Series,
 }
 
+impl ContentType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            ContentType::Live => "live",
+            ContentType::Movies => "movies",
+            ContentType::Series => "series",
+        }
+    }
+}
+
 impl std::fmt::Display for ContentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -19,6 +29,7 @@ impl std::fmt::Display for ContentType {
     }
 }
 use crate::config::ProviderConfig;
+use crate::ignore::IgnoredCategories;
 use crate::player::Player;
 use crate::xtream::{ApiEpisode, Category, FavouriteStream, Stream, VodInfoResponse, XTreamAPI};
 use chrono::{DateTime, Local};
@@ -93,6 +104,7 @@ pub struct App {
     pub state: AppState,
     pub providers: Vec<ProviderConfig>,
     pub current_api: Option<XTreamAPI>,
+    pub current_provider_name: Option<String>,
     pub player: Player,
     pub selected_index: usize,
     pub scroll_offset: usize,
@@ -104,7 +116,7 @@ pub struct App {
     pub log_display_mode: LogDisplayMode,
     pub log_selected_index: usize,
     pub log_scroll_offset: usize,
-    pub page_size: usize,
+    pub visible_height: usize, // Dynamically calculated based on terminal size
     pub search_query: String,
     pub search_active: bool,
     pub filtered_indices: Vec<usize>,
@@ -127,21 +139,14 @@ pub struct App {
     season_selection_state: NavigationState,
     favourite_selection_state: NavigationState,
     cross_provider_favourites_state: NavigationState,
+    ignored_categories: IgnoredCategories,
 }
 
 impl App {
-    /// Get the current provider name if available
-    pub fn get_current_provider_name(&self) -> Option<String> {
-        // Get the provider name from the provider config that was used to create the API
-        if self.current_api.is_some() && !self.providers.is_empty() {
-            // If we have a single provider, use it
-            if self.providers.len() == 1 {
-                return self.providers[0].name.clone();
-            }
-            // Otherwise, we need to track which provider was selected
-            // For now, just return None - this would need additional state tracking
-        }
-        None
+    pub fn update_visible_height(&mut self, height: usize) {
+        // Update the visible height based on terminal size
+        // Account for header (3 lines) and footer (1 line)
+        self.visible_height = height.saturating_sub(4).max(1);
     }
 
     pub fn new(providers: Vec<ProviderConfig>, player: Player) -> Self {
@@ -171,6 +176,7 @@ impl App {
             state,
             providers,
             current_api: None,
+            current_provider_name: None,
             player,
             selected_index: 0,
             scroll_offset: 0,
@@ -182,7 +188,7 @@ impl App {
             log_display_mode: LogDisplayMode::Side,
             log_selected_index: 0,
             log_scroll_offset: 0,
-            page_size: 20,
+            visible_height: 20, // Will be updated on first render
             search_query: String::new(),
             search_active: false,
             filtered_indices,
@@ -202,6 +208,7 @@ impl App {
             season_selection_state: NavigationState::new(),
             favourite_selection_state: NavigationState::new(),
             cross_provider_favourites_state: NavigationState::new(),
+            ignored_categories: IgnoredCategories::load().unwrap_or_default(),
         }
     }
 
@@ -211,6 +218,15 @@ impl App {
     }
 
     pub async fn async_tick(&mut self) {
+        // Auto-connect to single provider on startup
+        if matches!(self.state, AppState::Loading(_))
+            && self.providers.len() == 1
+            && self.current_api.is_none()
+        {
+            let provider = self.providers[0].clone();
+            self.connect_to_provider(&provider).await;
+        }
+
         // Check player status periodically to detect exits
         if matches!(self.state, AppState::Playing(_)) {
             let (is_running, exit_message) = self.player.check_player_status().await;
@@ -269,7 +285,7 @@ impl App {
                     return None;
                 }
                 KeyCode::PageUp => {
-                    let page_size = 10;
+                    let page_size = self.visible_height.saturating_sub(2).max(1);
                     self.log_selected_index = self.log_selected_index.saturating_sub(page_size);
                     if self.log_selected_index < self.log_scroll_offset {
                         self.log_scroll_offset = self.log_selected_index;
@@ -277,7 +293,7 @@ impl App {
                     return None;
                 }
                 KeyCode::PageDown => {
-                    let page_size = 10;
+                    let page_size = self.visible_height.saturating_sub(2).max(1);
                     let max_index = self.logs.len().saturating_sub(1);
                     self.log_selected_index = (self.log_selected_index + page_size).min(max_index);
                     return None;
@@ -423,12 +439,88 @@ impl App {
                 KeyCode::PageUp => self.move_selection_page_up(),
                 KeyCode::PageDown => self.move_selection_page_down(),
                 KeyCode::Home | KeyCode::Char('H') => self.move_selection_home(),
+                KeyCode::Char('i') => {
+                    // Toggle ignore for current category
+                    if let Some(category) = self.get_current_category() {
+                        if category.category_name != "All" && category.category_id != "all" {
+                            // Don't allow ignoring "All" category
+                            let provider_name = self
+                                .current_provider_name
+                                .as_ref()
+                                .unwrap_or(&String::new())
+                                .clone();
+
+                            self.add_log(format!(
+                                "Toggling ignore for {} category '{}' in provider '{}'",
+                                content_type.as_str(),
+                                category.category_name,
+                                provider_name
+                            ));
+
+                            match self.ignored_categories.toggle_category(
+                                &provider_name,
+                                content_type.as_str(),
+                                &category.category_name,
+                            ) {
+                                Ok(is_ignored) => {
+                                    let msg = if is_ignored {
+                                        format!(
+                                            "Category '{}' will be hidden",
+                                            category.category_name
+                                        )
+                                    } else {
+                                        format!(
+                                            "Category '{}' will be shown",
+                                            category.category_name
+                                        )
+                                    };
+                                    self.add_log(msg.clone());
+                                    self.status_message = Some(msg);
+
+                                    // Save current position before reloading
+                                    let current_pos = self.selected_index;
+                                    let was_last_item = current_pos == self.categories.len() - 1;
+
+                                    // Reload categories without restoring navigation state
+                                    // (we need to preserve our adjusted position)
+                                    self.load_categories_without_nav_restore(content_type).await;
+
+                                    // Adjust selection after reload if we ignored a category
+                                    if is_ignored && !self.categories.is_empty() {
+                                        // Keep the same index position, unless we were at the last item
+                                        // If we were at the last item, move to the new last item
+                                        if was_last_item || current_pos >= self.categories.len() {
+                                            self.selected_index =
+                                                self.categories.len().saturating_sub(1);
+                                        } else {
+                                            // Keep the same index - the next item will move up into this position
+                                            self.selected_index =
+                                                current_pos.min(self.categories.len() - 1);
+                                        }
+
+                                        // Ensure filtered_indices are properly set
+                                        self.filtered_indices = (0..self.items.len()).collect();
+                                    }
+                                }
+                                Err(e) => {
+                                    let msg = format!("Failed to toggle ignore: {}", e);
+                                    self.add_log(msg.clone());
+                                    self.status_message = Some(msg);
+                                }
+                            }
+                        } else {
+                            self.status_message = Some("Cannot ignore 'All' category".to_string());
+                        }
+                    } else {
+                        self.add_log("No category selected".to_string());
+                    }
+                }
                 KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Char('r') => {
                     // Force refresh categories
                     let ct = content_type;
                     self.add_log("Refreshing categories...".to_string());
-                    self.load_categories_internal(ct, true).await;
+                    self.load_categories_internal(ct, true, true).await;
                 }
                 KeyCode::Enter => {
                     if self.selected_index < self.categories.len() {
@@ -584,14 +676,14 @@ impl App {
                 KeyCode::PageUp => {
                     // Always scroll content up by page
                     if let AppState::VodInfo(state) = &mut self.state {
-                        let visible_height = self.page_size;
+                        let visible_height = self.visible_height.saturating_sub(2).max(1);
                         state.content_scroll = state.content_scroll.saturating_sub(visible_height);
                     }
                 }
                 KeyCode::PageDown => {
                     // Always scroll content down by page
                     if let AppState::VodInfo(state) = &mut self.state {
-                        let visible_height = self.page_size;
+                        let visible_height = self.visible_height.saturating_sub(2).max(1);
                         let max_scroll = self
                             .items
                             .len()
@@ -605,14 +697,14 @@ impl App {
                     if key.modifiers.contains(KeyModifiers::SHIFT) {
                         // Shift+Space - scroll up by page
                         if let AppState::VodInfo(state) = &mut self.state {
-                            let visible_height = self.page_size;
+                            let visible_height = self.visible_height.saturating_sub(2).max(1);
                             state.content_scroll =
                                 state.content_scroll.saturating_sub(visible_height);
                         }
                     } else {
                         // Space - scroll down by page
                         if let AppState::VodInfo(state) = &mut self.state {
-                            let visible_height = self.page_size;
+                            let visible_height = self.visible_height.saturating_sub(2).max(1);
                             let max_scroll = self
                                 .items
                                 .len()
@@ -631,7 +723,7 @@ impl App {
                 KeyCode::End | KeyCode::Char('G') => {
                     // Always scroll content to bottom
                     if let AppState::VodInfo(state) = &mut self.state {
-                        let visible_height = self.page_size;
+                        let visible_height = self.visible_height.saturating_sub(2).max(1);
                         state.content_scroll = self
                             .items
                             .len()
@@ -991,25 +1083,11 @@ impl App {
             if current_pos > 0 {
                 // Normal upward movement
                 self.selected_index = indices[current_pos - 1];
-                // Update scroll to follow selection
-                let visible_pos = indices[0..current_pos]
-                    .iter()
-                    .filter(|&&idx| idx >= self.scroll_offset)
-                    .count();
-                if visible_pos == 0 {
-                    self.scroll_offset = self.scroll_offset.saturating_sub(1);
-                }
             } else {
                 // Wrap to bottom: move to last item
                 self.selected_index = indices[indices.len() - 1];
-                // Update scroll to show the last item
-                let visible_height = 20;
-                if indices.len() > visible_height {
-                    self.scroll_offset = indices.len() - visible_height;
-                } else {
-                    self.scroll_offset = 0;
-                }
             }
+            self.ensure_selected_visible();
         }
     }
 
@@ -1028,17 +1106,11 @@ impl App {
             if current_pos < indices.len() - 1 {
                 // Normal downward movement
                 self.selected_index = indices[current_pos + 1];
-                // Update scroll to follow selection
-                let visible_height = 20;
-                if current_pos + 1 >= self.scroll_offset + visible_height {
-                    self.scroll_offset = current_pos + 1 - visible_height + 1;
-                }
             } else {
                 // Wrap to top: move to first item
                 self.selected_index = indices[0];
-                // Reset scroll to top
-                self.scroll_offset = 0;
             }
+            self.ensure_selected_visible();
         }
     }
 
@@ -1050,11 +1122,10 @@ impl App {
         };
 
         if let Some(current_pos) = indices.iter().position(|&idx| idx == self.selected_index) {
-            let new_pos = current_pos.saturating_sub(10);
+            let page_size = self.visible_height.saturating_sub(2).max(1);
+            let new_pos = current_pos.saturating_sub(page_size);
             self.selected_index = indices[new_pos];
-            if new_pos < self.scroll_offset {
-                self.scroll_offset = new_pos;
-            }
+            self.ensure_selected_visible();
         }
     }
 
@@ -1066,12 +1137,10 @@ impl App {
         };
 
         if let Some(current_pos) = indices.iter().position(|&idx| idx == self.selected_index) {
-            let new_pos = (current_pos + 10).min(indices.len() - 1);
+            let page_size = self.visible_height.saturating_sub(2).max(1);
+            let new_pos = (current_pos + page_size).min(indices.len() - 1);
             self.selected_index = indices[new_pos];
-            let visible_height = 20;
-            if new_pos >= self.scroll_offset + visible_height {
-                self.scroll_offset = new_pos - visible_height + 1;
-            }
+            self.ensure_selected_visible();
         }
     }
 
@@ -1097,12 +1166,7 @@ impl App {
 
         if !indices.is_empty() {
             self.selected_index = indices[indices.len() - 1];
-            let visible_height = 20;
-            if indices.len() > visible_height {
-                self.scroll_offset = indices.len() - visible_height;
-            } else {
-                self.scroll_offset = 0;
-            }
+            self.ensure_selected_visible();
         }
     }
 
@@ -1129,6 +1193,12 @@ impl App {
                 // Note: We can't actually pass a closure that captures self here due to lifetime issues
                 // Instead we'll just disable progress bars for now
                 self.current_api = Some(api);
+                self.current_provider_name = Some(
+                    provider
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| provider.url.clone()),
+                );
                 // Clear caches when switching providers
                 self.cached_categories.clear();
                 self.cached_streams.clear();
@@ -1190,14 +1260,41 @@ impl App {
     }
 
     async fn load_categories(&mut self, content_type: ContentType) {
-        self.load_categories_internal(content_type, false).await;
+        self.load_categories_internal(content_type, false, true)
+            .await;
     }
 
-    async fn load_categories_internal(&mut self, content_type: ContentType, force_refresh: bool) {
+    async fn load_categories_without_nav_restore(&mut self, content_type: ContentType) {
+        self.load_categories_internal(content_type, false, false)
+            .await;
+    }
+
+    async fn load_categories_internal(
+        &mut self,
+        content_type: ContentType,
+        force_refresh: bool,
+        restore_nav: bool,
+    ) {
         // Check cache first if not forcing refresh
         if !force_refresh && let Some(cached) = self.cached_categories.get(&content_type) {
             let ct = content_type;
-            self.categories = cached.clone();
+            // Filter out ignored categories from cache
+            let provider_name = self
+                .current_provider_name
+                .as_ref()
+                .unwrap_or(&String::new())
+                .clone();
+            self.categories = cached
+                .iter()
+                .filter(|cat| {
+                    !self.ignored_categories.is_ignored(
+                        &provider_name,
+                        content_type.as_str(),
+                        &cat.category_name,
+                    )
+                })
+                .cloned()
+                .collect();
             self.add_log(format!("Using cached {} categories", ct));
             self.items = self
                 .categories
@@ -1206,7 +1303,9 @@ impl App {
                 .collect();
             self.reset_filter();
             self.state = AppState::CategorySelection(content_type);
-            self.restore_navigation_state(&AppState::CategorySelection(content_type));
+            if restore_nav {
+                self.restore_navigation_state(&AppState::CategorySelection(content_type));
+            }
             return;
         }
 
@@ -1230,11 +1329,27 @@ impl App {
                     };
                     categories.insert(0, all_category);
 
-                    // Store in cache
+                    // Store in cache (unfiltered)
                     self.cached_categories
                         .insert(content_type, categories.clone());
 
-                    self.categories = categories;
+                    // Filter out ignored categories
+                    let provider_name = self
+                        .current_provider_name
+                        .as_ref()
+                        .unwrap_or(&String::new())
+                        .clone();
+                    self.categories = categories
+                        .into_iter()
+                        .filter(|cat| {
+                            !self.ignored_categories.is_ignored(
+                                &provider_name,
+                                content_type.as_str(),
+                                &cat.category_name,
+                            )
+                        })
+                        .collect();
+
                     self.items = self
                         .categories
                         .iter()
@@ -1242,7 +1357,9 @@ impl App {
                         .collect();
                     self.reset_filter();
                     self.state = AppState::CategorySelection(content_type);
-                    self.restore_navigation_state(&AppState::CategorySelection(content_type));
+                    if restore_nav {
+                        self.restore_navigation_state(&AppState::CategorySelection(content_type));
+                    }
                     self.add_log(format!("Loaded {} categories", self.categories.len()));
                 }
                 Err(e) => {
@@ -1549,6 +1666,7 @@ impl App {
     async fn load_all_favourites(&mut self) {
         self.state = AppState::Loading("Loading all favourites...".to_string());
         self.add_log("Loading favourites from all providers".to_string());
+        self.current_provider_name = Some("All Favourites".to_string());
 
         let favourites_manager = match crate::FavouritesManager::new() {
             Ok(fm) => fm,
@@ -2273,6 +2391,15 @@ impl App {
         };
     }
 
+    fn get_current_category(&self) -> Option<Category> {
+        // selected_index is already the actual index in the categories array
+        if self.selected_index < self.categories.len() {
+            Some(self.categories[self.selected_index].clone())
+        } else {
+            None
+        }
+    }
+
     /// Clear internal TUI caches
     pub fn clear_internal_caches(&mut self) {
         self.cached_categories.clear();
@@ -2289,15 +2416,35 @@ impl App {
 
     fn ensure_selected_visible(&mut self) {
         // Make sure the selected item is visible on screen
-        let visible_height = self.page_size;
+        let visible_height = self.visible_height.max(1);
+
+        // Get the actual position in the filtered list
+        let position = if self.filtered_indices.is_empty() {
+            self.selected_index
+        } else {
+            self.filtered_indices
+                .iter()
+                .position(|&i| i == self.selected_index)
+                .unwrap_or(0)
+        };
+
+        // Keep 1 line of context when scrolling (if possible)
+        let context_lines = 1;
 
         // If selected item is above visible area, scroll up
-        if self.selected_index < self.scroll_offset {
-            self.scroll_offset = self.selected_index;
+        if position < self.scroll_offset + context_lines {
+            self.scroll_offset = position.saturating_sub(context_lines);
         }
         // If selected item is below visible area, scroll down
-        else if self.selected_index >= self.scroll_offset + visible_height {
-            self.scroll_offset = self.selected_index.saturating_sub(visible_height - 1);
+        else if position >= self.scroll_offset + visible_height - context_lines {
+            let max_scroll = if self.filtered_indices.is_empty() {
+                self.items.len().saturating_sub(visible_height)
+            } else {
+                self.filtered_indices.len().saturating_sub(visible_height)
+            };
+            self.scroll_offset = (position + context_lines + 1)
+                .saturating_sub(visible_height)
+                .min(max_scroll);
         }
     }
 

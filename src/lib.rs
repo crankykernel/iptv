@@ -4,6 +4,7 @@
 pub mod cache;
 pub mod config;
 pub mod favourites;
+pub mod ignore;
 pub mod player;
 pub mod tui;
 pub mod xtream;

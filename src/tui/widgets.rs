@@ -63,6 +63,7 @@ pub fn create_help_widget() -> Paragraph<'static> {
         )]),
         Line::from("  /         - Fuzzy search/filter list"),
         Line::from("  f         - Toggle favourite (in stream/favourite lists)"),
+        Line::from("  i         - Toggle ignore category (in category list)"),
         Line::from("  s         - Stop any active playback"),
         Line::from("  ?/F1      - Toggle this help"),
         Line::from("  Ctrl+C    - Force quit"),
