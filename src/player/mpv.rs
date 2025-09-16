@@ -332,16 +332,82 @@ impl MpvPlayer {
 
         sleep(Duration::from_millis(100)).await;
 
-        // Load and play the new video
-        let command = json!({
-            "command": ["loadfile", video_url, "replace"]
-        });
+        // Try to load the video with retries
+        const MAX_RETRIES: u32 = 3;
+        const INITIAL_DELAY_MS: u64 = 500;
 
-        self.send_command(command)
-            .context("Failed to send play command to MPV")?;
+        let mut last_error = None;
 
-        debug!("Successfully started playing video in MPV");
-        Ok(())
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                let delay_ms = INITIAL_DELAY_MS * (attempt as u64);
+                debug!(
+                    "Retrying stream connection (attempt {}/{}), waiting {}ms...",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay_ms
+                );
+                sleep(Duration::from_millis(delay_ms)).await;
+
+                // Stop any partial playback from previous attempt
+                let _ = self.send_command(json!({
+                    "command": ["stop"]
+                }));
+                sleep(Duration::from_millis(100)).await;
+            }
+
+            // Load and play the new video
+            let command = json!({
+                "command": ["loadfile", video_url, "replace"]
+            });
+
+            match self.send_command(command) {
+                Ok(_) => {
+                    // Wait a bit to see if the stream actually starts
+                    sleep(Duration::from_millis(500)).await;
+
+                    // Check if playback actually started by checking if file is loaded
+                    let check_command = json!({
+                        "command": ["get_property", "filename"]
+                    });
+
+                    match self.send_command(check_command) {
+                        Ok(_) => {
+                            if attempt > 0 {
+                                debug!(
+                                    "Successfully started playing video in MPV after {} retries",
+                                    attempt
+                                );
+                            } else {
+                                debug!("Successfully started playing video in MPV");
+                            }
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            warn!("Stream may not have started properly: {}", e);
+                            last_error = Some(e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to send play command to MPV (attempt {}/{}): {}",
+                        attempt + 1,
+                        MAX_RETRIES,
+                        e
+                    );
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        // All retries failed
+        Err(last_error
+            .unwrap_or_else(|| anyhow::anyhow!("Failed to play stream"))
+            .context(format!(
+                "Failed to play stream after {} attempts",
+                MAX_RETRIES
+            )))
     }
 
     /// Stop MPV playback and optionally kill the process
