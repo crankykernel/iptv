@@ -152,11 +152,7 @@ fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(block, area);
 
     // Get the items to display based on filter
-    let display_indices: Vec<usize> = if app.filtered_indices.is_empty() {
-        (0..app.items.len()).collect()
-    } else {
-        app.filtered_indices.clone()
-    };
+    let display_indices: Vec<usize> = app.filtered_indices.clone();
 
     if display_indices.is_empty() {
         let empty_msg = Paragraph::new(if app.search_active || !app.search_query.is_empty() {

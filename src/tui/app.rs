@@ -9,15 +9,7 @@ pub enum ContentType {
     Series,
 }
 
-impl ContentType {
-    fn as_str(&self) -> &'static str {
-        match self {
-            ContentType::Live => "live",
-            ContentType::Movies => "movies",
-            ContentType::Series => "series",
-        }
-    }
-}
+impl ContentType {}
 
 impl std::fmt::Display for ContentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -29,7 +21,7 @@ impl std::fmt::Display for ContentType {
     }
 }
 use crate::config::ProviderConfig;
-use crate::ignore::IgnoredCategories;
+use crate::ignore::IgnoreConfig;
 use crate::player::Player;
 use crate::xtream::{ApiEpisode, Category, FavouriteStream, Stream, VodInfoResponse, XTreamAPI};
 use chrono::{DateTime, Local};
@@ -139,7 +131,7 @@ pub struct App {
     season_selection_state: NavigationState,
     favourite_selection_state: NavigationState,
     cross_provider_favourites_state: NavigationState,
-    ignored_categories: IgnoredCategories,
+    ignore_config: IgnoreConfig,
 }
 
 impl App {
@@ -208,7 +200,7 @@ impl App {
             season_selection_state: NavigationState::new(),
             favourite_selection_state: NavigationState::new(),
             cross_provider_favourites_state: NavigationState::new(),
-            ignored_categories: IgnoredCategories::load().unwrap_or_default(),
+            ignore_config: IgnoreConfig::load().unwrap_or_default(),
         }
     }
 
@@ -444,24 +436,18 @@ impl App {
                     if let Some(category) = self.get_current_category() {
                         if category.category_name != "All" && category.category_id != "all" {
                             // Don't allow ignoring "All" category
-                            let provider_name = self
+                            let _provider_name = self
                                 .current_provider_name
                                 .as_ref()
                                 .unwrap_or(&String::new())
                                 .clone();
 
                             self.add_log(format!(
-                                "Toggling ignore for {} category '{}' in provider '{}'",
-                                content_type.as_str(),
-                                category.category_name,
-                                provider_name
+                                "Toggling ignore for category '{}'",
+                                category.category_name
                             ));
 
-                            match self.ignored_categories.toggle_category(
-                                &provider_name,
-                                content_type.as_str(),
-                                &category.category_name,
-                            ) {
+                            match self.ignore_config.toggle_category(&category.category_name) {
                                 Ok(is_ignored) => {
                                     let msg = if is_ignored {
                                         format!(
@@ -477,29 +463,146 @@ impl App {
                                     self.add_log(msg.clone());
                                     self.status_message = Some(msg);
 
-                                    // Save current position before reloading
-                                    let current_pos = self.selected_index;
-                                    let was_last_item = current_pos == self.categories.len() - 1;
+                                    // Save current state before reloading
+                                    let current_filter_pos = self
+                                        .filtered_indices
+                                        .iter()
+                                        .position(|&idx| idx == self.selected_index)
+                                        .unwrap_or(0);
+                                    let current_scroll = self.scroll_offset;
+
+                                    // Find the first visible item that won't be ignored (for scroll anchoring)
+                                    let visible_anchor =
+                                        self.filtered_indices.iter().skip(current_scroll).find_map(
+                                            |&idx| {
+                                                let cat = &self.categories[idx];
+                                                if cat.category_name != category.category_name {
+                                                    Some(cat.category_name.clone())
+                                                } else {
+                                                    None
+                                                }
+                                            },
+                                        );
+
+                                    // For determining next selection: get the next item in the filtered list
+                                    let next_item_name = if is_ignored {
+                                        // Check if we're at the last position
+                                        let is_last_item =
+                                            current_filter_pos == self.filtered_indices.len() - 1;
+
+                                        if is_last_item && current_filter_pos > 0 {
+                                            // If at the last item and not at index 0, prefer the previous item
+                                            self.filtered_indices
+                                                .iter()
+                                                .take(current_filter_pos)
+                                                .rev()
+                                                .find_map(|&idx| {
+                                                    let cat = &self.categories[idx];
+                                                    if cat.category_name != category.category_name {
+                                                        Some(cat.category_name.clone())
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                        } else {
+                                            // Otherwise, look for the next item (forward, then wrap)
+                                            self.filtered_indices
+                                                .iter()
+                                                .skip(current_filter_pos + 1)
+                                                .chain(
+                                                    self.filtered_indices
+                                                        .iter()
+                                                        .take(current_filter_pos),
+                                                )
+                                                .find_map(|&idx| {
+                                                    let cat = &self.categories[idx];
+                                                    if cat.category_name != category.category_name {
+                                                        Some(cat.category_name.clone())
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                        }
+                                    } else {
+                                        None
+                                    };
 
                                     // Reload categories without restoring navigation state
-                                    // (we need to preserve our adjusted position)
+                                    // (preserves filter)
                                     self.load_categories_without_nav_restore(content_type).await;
 
-                                    // Adjust selection after reload if we ignored a category
-                                    if is_ignored && !self.categories.is_empty() {
-                                        // Keep the same index position, unless we were at the last item
-                                        // If we were at the last item, move to the new last item
-                                        if was_last_item || current_pos >= self.categories.len() {
-                                            self.selected_index =
-                                                self.categories.len().saturating_sub(1);
+                                    // Adjust selection and scroll after reload
+                                    if !self.filtered_indices.is_empty() {
+                                        // First, try to restore scroll position using the anchor
+                                        if let Some(anchor_name) = visible_anchor {
+                                            if let Some(anchor_pos) =
+                                                self.filtered_indices.iter().position(|&idx| {
+                                                    self.categories[idx].category_name
+                                                        == anchor_name
+                                                })
+                                            {
+                                                // Try to keep the anchor item at the same visual position
+                                                self.scroll_offset = anchor_pos;
+                                            } else {
+                                                // Anchor not found, try to maintain scroll position
+                                                self.scroll_offset = current_scroll.min(
+                                                    self.filtered_indices
+                                                        .len()
+                                                        .saturating_sub(self.visible_height),
+                                                );
+                                            }
                                         } else {
-                                            // Keep the same index - the next item will move up into this position
-                                            self.selected_index =
-                                                current_pos.min(self.categories.len() - 1);
+                                            // No anchor, maintain scroll position as best as possible
+                                            self.scroll_offset = current_scroll.min(
+                                                self.filtered_indices
+                                                    .len()
+                                                    .saturating_sub(self.visible_height),
+                                            );
                                         }
 
-                                        // Ensure filtered_indices are properly set
-                                        self.filtered_indices = (0..self.items.len()).collect();
+                                        // Now select the appropriate item
+                                        let new_selected = if let Some(next_name) = next_item_name {
+                                            // Find the item we want to select
+                                            self.filtered_indices
+                                                .iter()
+                                                .find(|&&idx| {
+                                                    self.categories[idx].category_name == next_name
+                                                })
+                                                .copied()
+                                                .unwrap_or_else(|| {
+                                                    // Fallback: select first visible item
+                                                    let pos = self.scroll_offset.min(
+                                                        self.filtered_indices
+                                                            .len()
+                                                            .saturating_sub(1),
+                                                    );
+                                                    self.filtered_indices[pos]
+                                                })
+                                        } else {
+                                            // Not ignoring: try to maintain position
+                                            let pos = current_filter_pos
+                                                .min(self.filtered_indices.len().saturating_sub(1));
+                                            self.filtered_indices[pos]
+                                        };
+
+                                        self.selected_index = new_selected;
+
+                                        // Only adjust scroll if selected item is not visible
+                                        if let Some(filter_pos) = self
+                                            .filtered_indices
+                                            .iter()
+                                            .position(|&idx| idx == new_selected)
+                                        {
+                                            if filter_pos < self.scroll_offset {
+                                                self.scroll_offset = filter_pos;
+                                            } else if filter_pos
+                                                >= self.scroll_offset + self.visible_height
+                                            {
+                                                self.scroll_offset = filter_pos.saturating_sub(
+                                                    self.visible_height.saturating_sub(1),
+                                                );
+                                            }
+                                        }
                                     }
                                 }
                                 Err(e) => {
@@ -530,10 +633,15 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
-                    self.save_current_navigation_state();
-                    self.state = AppState::MainMenu;
-                    self.restore_navigation_state(&AppState::MainMenu);
-                    self.update_main_menu_items();
+                    // If there's an active filter, clear it instead of going back
+                    if !self.search_query.is_empty() {
+                        self.reset_filter();
+                    } else {
+                        self.save_current_navigation_state();
+                        self.state = AppState::MainMenu;
+                        self.restore_navigation_state(&AppState::MainMenu);
+                        self.update_main_menu_items();
+                    }
                 }
                 _ => {}
             },
@@ -549,13 +657,175 @@ impl App {
                     let ct = content_type;
                     let cat = category.clone();
                     self.add_log("Refreshing streams...".to_string());
-                    self.load_streams_internal(ct, cat, true).await;
+                    self.load_streams_internal(ct, cat, true, true).await;
                 }
                 KeyCode::Char('f') => {
                     // selected_index already points to the correct stream
                     if self.selected_index < self.streams.len() {
                         let stream = self.streams[self.selected_index].clone();
                         self.toggle_favourite_stream(&stream).await;
+                    }
+                }
+                KeyCode::Char('i') => {
+                    // Toggle ignore for current channel (only for live TV)
+                    if content_type == ContentType::Live && self.selected_index < self.streams.len()
+                    {
+                        let stream_name = self.streams[self.selected_index].name.clone();
+                        self.add_log(format!("Toggling ignore for channel '{}'", stream_name));
+                        match self.ignore_config.toggle_channel(&stream_name) {
+                            Ok(is_ignored) => {
+                                let msg = if is_ignored {
+                                    format!("Channel '{}' will be hidden", stream_name)
+                                } else {
+                                    format!("Channel '{}' will be shown", stream_name)
+                                };
+                                self.add_log(msg.clone());
+                                self.status_message = Some(msg);
+
+                                // Save current state before reloading
+                                let current_filter_pos = self
+                                    .filtered_indices
+                                    .iter()
+                                    .position(|&idx| idx == self.selected_index)
+                                    .unwrap_or(0);
+                                let current_scroll = self.scroll_offset;
+
+                                // Find the first visible item that won't be ignored (for scroll anchoring)
+                                let visible_anchor =
+                                    self.filtered_indices.iter().skip(current_scroll).find_map(
+                                        |&idx| {
+                                            let strm = &self.streams[idx];
+                                            if strm.name != stream_name {
+                                                Some(strm.name.clone())
+                                            } else {
+                                                None
+                                            }
+                                        },
+                                    );
+
+                                // For determining next selection: get the next item in the filtered list
+                                let next_stream_name = if is_ignored {
+                                    // Check if we're at the last position
+                                    let is_last_item =
+                                        current_filter_pos == self.filtered_indices.len() - 1;
+
+                                    if is_last_item && current_filter_pos > 0 {
+                                        // If at the last item and not at index 0, prefer the previous item
+                                        self.filtered_indices
+                                            .iter()
+                                            .take(current_filter_pos)
+                                            .rev()
+                                            .find_map(|&idx| {
+                                                let strm = &self.streams[idx];
+                                                if strm.name != stream_name {
+                                                    Some(strm.name.clone())
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                    } else {
+                                        // Otherwise, look for the next item (forward, then wrap)
+                                        self.filtered_indices
+                                            .iter()
+                                            .skip(current_filter_pos + 1)
+                                            .chain(
+                                                self.filtered_indices
+                                                    .iter()
+                                                    .take(current_filter_pos),
+                                            )
+                                            .find_map(|&idx| {
+                                                let strm = &self.streams[idx];
+                                                if strm.name != stream_name {
+                                                    Some(strm.name.clone())
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                    }
+                                } else {
+                                    None
+                                };
+
+                                // Reload streams to apply the change (preserves filter)
+                                let ct = content_type;
+                                let cat = category.clone();
+                                self.load_streams_without_nav_restore(ct, cat).await;
+
+                                // Adjust selection and scroll after reload
+                                if !self.filtered_indices.is_empty() {
+                                    // First, try to restore scroll position using the anchor
+                                    if let Some(anchor_name) = visible_anchor {
+                                        if let Some(anchor_pos) = self
+                                            .filtered_indices
+                                            .iter()
+                                            .position(|&idx| self.streams[idx].name == anchor_name)
+                                        {
+                                            // Try to keep the anchor item at the same visual position
+                                            self.scroll_offset = anchor_pos;
+                                        } else {
+                                            // Anchor not found, try to maintain scroll position
+                                            self.scroll_offset = current_scroll.min(
+                                                self.filtered_indices
+                                                    .len()
+                                                    .saturating_sub(self.visible_height),
+                                            );
+                                        }
+                                    } else {
+                                        // No anchor, maintain scroll position as best as possible
+                                        self.scroll_offset = current_scroll.min(
+                                            self.filtered_indices
+                                                .len()
+                                                .saturating_sub(self.visible_height),
+                                        );
+                                    }
+
+                                    // Now select the appropriate item
+                                    let new_selected = if let Some(next_name) = next_stream_name {
+                                        // Find the stream we want to select
+                                        self.filtered_indices
+                                            .iter()
+                                            .find(|&&idx| self.streams[idx].name == next_name)
+                                            .copied()
+                                            .unwrap_or_else(|| {
+                                                // Fallback: select first visible item
+                                                let pos = self.scroll_offset.min(
+                                                    self.filtered_indices.len().saturating_sub(1),
+                                                );
+                                                self.filtered_indices[pos]
+                                            })
+                                    } else {
+                                        // Not ignoring: try to maintain position
+                                        let pos = current_filter_pos
+                                            .min(self.filtered_indices.len().saturating_sub(1));
+                                        self.filtered_indices[pos]
+                                    };
+
+                                    self.selected_index = new_selected;
+
+                                    // Only adjust scroll if selected item is not visible
+                                    if let Some(filter_pos) = self
+                                        .filtered_indices
+                                        .iter()
+                                        .position(|&idx| idx == new_selected)
+                                    {
+                                        if filter_pos < self.scroll_offset {
+                                            self.scroll_offset = filter_pos;
+                                        } else if filter_pos
+                                            >= self.scroll_offset + self.visible_height
+                                        {
+                                            self.scroll_offset = filter_pos.saturating_sub(
+                                                self.visible_height.saturating_sub(1),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                self.add_log(format!("Failed to toggle ignore: {}", e));
+                                self.status_message =
+                                    Some(format!("Failed to toggle ignore: {}", e));
+                            }
+                        }
                     }
                 }
                 KeyCode::Enter => {
@@ -607,12 +877,17 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
-                    // Go back to category selection
-                    self.save_current_navigation_state();
-                    self.state = AppState::CategorySelection(content_type);
-                    self.restore_navigation_state(&AppState::CategorySelection(content_type));
-                    // Reload categories to ensure UI is in sync
-                    self.load_categories(content_type).await;
+                    // If there's an active filter, clear it instead of going back
+                    if !self.search_query.is_empty() {
+                        self.reset_filter();
+                    } else {
+                        // Go back to category selection
+                        self.save_current_navigation_state();
+                        self.state = AppState::CategorySelection(content_type);
+                        self.restore_navigation_state(&AppState::CategorySelection(content_type));
+                        // Reload categories to ensure UI is in sync
+                        self.load_categories(content_type).await;
+                    }
                 }
                 _ => {}
             },
@@ -1012,10 +1287,15 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
-                    self.save_current_navigation_state();
-                    self.state = AppState::ProviderSelection;
-                    self.restore_navigation_state(&AppState::ProviderSelection);
-                    self.update_provider_items();
+                    // If there's an active filter, clear it instead of going back
+                    if !self.search_query.is_empty() {
+                        self.reset_filter();
+                    } else {
+                        self.save_current_navigation_state();
+                        self.state = AppState::ProviderSelection;
+                        self.restore_navigation_state(&AppState::ProviderSelection);
+                        self.update_provider_items();
+                    }
                 }
                 KeyCode::Char('/') => {
                     self.search_active = true;
@@ -1049,10 +1329,15 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
-                    self.save_current_navigation_state();
-                    self.state = AppState::MainMenu;
-                    self.restore_navigation_state(&AppState::MainMenu);
-                    self.update_main_menu_items();
+                    // If there's an active filter, clear it instead of going back
+                    if !self.search_query.is_empty() {
+                        self.reset_filter();
+                    } else {
+                        self.save_current_navigation_state();
+                        self.state = AppState::MainMenu;
+                        self.restore_navigation_state(&AppState::MainMenu);
+                        self.update_main_menu_items();
+                    }
                 }
                 _ => {}
             },
@@ -1069,11 +1354,7 @@ impl App {
     }
 
     fn move_selection_up(&mut self) {
-        let indices = if self.filtered_indices.is_empty() {
-            (0..self.items.len()).collect()
-        } else {
-            self.filtered_indices.clone()
-        };
+        let indices = self.filtered_indices.clone();
 
         if indices.is_empty() {
             return;
@@ -1092,11 +1373,7 @@ impl App {
     }
 
     fn move_selection_down(&mut self) {
-        let indices = if self.filtered_indices.is_empty() {
-            (0..self.items.len()).collect()
-        } else {
-            self.filtered_indices.clone()
-        };
+        let indices = self.filtered_indices.clone();
 
         if indices.is_empty() {
             return;
@@ -1115,11 +1392,7 @@ impl App {
     }
 
     fn move_selection_page_up(&mut self) {
-        let indices = if self.filtered_indices.is_empty() {
-            (0..self.items.len()).collect()
-        } else {
-            self.filtered_indices.clone()
-        };
+        let indices = self.filtered_indices.clone();
 
         if let Some(current_pos) = indices.iter().position(|&idx| idx == self.selected_index) {
             let page_size = self.visible_height.saturating_sub(2).max(1);
@@ -1130,11 +1403,7 @@ impl App {
     }
 
     fn move_selection_page_down(&mut self) {
-        let indices = if self.filtered_indices.is_empty() {
-            (0..self.items.len()).collect()
-        } else {
-            self.filtered_indices.clone()
-        };
+        let indices = self.filtered_indices.clone();
 
         if let Some(current_pos) = indices.iter().position(|&idx| idx == self.selected_index) {
             let page_size = self.visible_height.saturating_sub(2).max(1);
@@ -1145,11 +1414,7 @@ impl App {
     }
 
     fn move_selection_home(&mut self) {
-        let indices = if self.filtered_indices.is_empty() {
-            (0..self.items.len()).collect()
-        } else {
-            self.filtered_indices.clone()
-        };
+        let indices = self.filtered_indices.clone();
 
         if !indices.is_empty() {
             self.selected_index = indices[0];
@@ -1158,11 +1423,7 @@ impl App {
     }
 
     fn move_selection_end(&mut self) {
-        let indices = if self.filtered_indices.is_empty() {
-            (0..self.items.len()).collect()
-        } else {
-            self.filtered_indices.clone()
-        };
+        let indices = self.filtered_indices.clone();
 
         if !indices.is_empty() {
             self.selected_index = indices[indices.len() - 1];
@@ -1202,6 +1463,13 @@ impl App {
                 // Clear caches when switching providers
                 self.cached_categories.clear();
                 self.cached_streams.clear();
+
+                // Clear navigation states to prevent index out of bounds with different provider
+                self.category_selection_states.clear();
+                self.stream_selection_states.clear();
+                self.season_selection_state = NavigationState::new();
+                self.favourite_selection_state = NavigationState::new();
+
                 self.state = AppState::MainMenu;
                 self.restore_navigation_state(&AppState::MainMenu);
                 self.update_main_menu_items();
@@ -1265,8 +1533,17 @@ impl App {
     }
 
     async fn load_categories_without_nav_restore(&mut self, content_type: ContentType) {
+        // Save current filter state
+        let saved_query = self.search_query.clone();
+        let saved_search_active = self.search_active;
+
         self.load_categories_internal(content_type, false, false)
             .await;
+
+        // Restore filter state and reapply
+        self.search_query = saved_query;
+        self.search_active = saved_search_active;
+        self.apply_filter();
     }
 
     async fn load_categories_internal(
@@ -1279,20 +1556,14 @@ impl App {
         if !force_refresh && let Some(cached) = self.cached_categories.get(&content_type) {
             let ct = content_type;
             // Filter out ignored categories from cache
-            let provider_name = self
+            let _provider_name = self
                 .current_provider_name
                 .as_ref()
                 .unwrap_or(&String::new())
                 .clone();
             self.categories = cached
                 .iter()
-                .filter(|cat| {
-                    !self.ignored_categories.is_ignored(
-                        &provider_name,
-                        content_type.as_str(),
-                        &cat.category_name,
-                    )
-                })
+                .filter(|cat| !self.ignore_config.is_category_ignored(&cat.category_name))
                 .cloned()
                 .collect();
             self.add_log(format!("Using cached {} categories", ct));
@@ -1334,20 +1605,14 @@ impl App {
                         .insert(content_type, categories.clone());
 
                     // Filter out ignored categories
-                    let provider_name = self
+                    let _provider_name = self
                         .current_provider_name
                         .as_ref()
                         .unwrap_or(&String::new())
                         .clone();
                     self.categories = categories
                         .into_iter()
-                        .filter(|cat| {
-                            !self.ignored_categories.is_ignored(
-                                &provider_name,
-                                content_type.as_str(),
-                                &cat.category_name,
-                            )
-                        })
+                        .filter(|cat| !self.ignore_config.is_category_ignored(&cat.category_name))
                         .collect();
 
                     self.items = self
@@ -1371,8 +1636,26 @@ impl App {
     }
 
     async fn load_streams(&mut self, content_type: ContentType, category: Category) {
-        self.load_streams_internal(content_type, category, false)
+        self.load_streams_internal(content_type, category, false, true)
             .await;
+    }
+
+    async fn load_streams_without_nav_restore(
+        &mut self,
+        content_type: ContentType,
+        category: Category,
+    ) {
+        // Save current filter state
+        let saved_query = self.search_query.clone();
+        let saved_search_active = self.search_active;
+
+        self.load_streams_internal(content_type, category, false, false)
+            .await;
+
+        // Restore filter state and reapply
+        self.search_query = saved_query;
+        self.search_active = saved_search_active;
+        self.apply_filter();
     }
 
     async fn load_streams_internal(
@@ -1380,12 +1663,20 @@ impl App {
         content_type: ContentType,
         category: Category,
         force_refresh: bool,
+        restore_nav: bool,
     ) {
         // Check cache first if not forcing refresh
         let cache_key = (content_type, category.category_id.clone());
         if !force_refresh && let Some(cached) = self.cached_streams.get(&cache_key) {
             let cat_name = category.category_name.clone();
             self.streams = cached.clone();
+
+            // Filter out ignored channels for live TV
+            if content_type == ContentType::Live {
+                self.streams
+                    .retain(|s| !self.ignore_config.is_channel_ignored(&s.name));
+            }
+
             self.add_log(format!("Using cached streams for {}", cat_name));
 
             // Get list of favourites to mark them with a star
@@ -1413,7 +1704,9 @@ impl App {
 
             self.reset_filter();
             self.state = AppState::StreamSelection(content_type, category.clone());
-            self.restore_navigation_state(&AppState::StreamSelection(content_type, category));
+            if restore_nav {
+                self.restore_navigation_state(&AppState::StreamSelection(content_type, category));
+            }
             return;
         }
 
@@ -1539,6 +1832,12 @@ impl App {
 
                     self.streams = streams;
 
+                    // Filter out ignored channels for live TV
+                    if content_type == ContentType::Live {
+                        self.streams
+                            .retain(|s| !self.ignore_config.is_channel_ignored(&s.name));
+                    }
+
                     // Get list of favourites to mark them with a star
                     let favourites = if let Some(api) = &self.current_api {
                         api.favourites_manager
@@ -1565,10 +1864,12 @@ impl App {
 
                     self.reset_filter();
                     self.state = AppState::StreamSelection(content_type, category.clone());
-                    self.restore_navigation_state(&AppState::StreamSelection(
-                        content_type,
-                        category,
-                    ));
+                    if restore_nav {
+                        self.restore_navigation_state(&AppState::StreamSelection(
+                            content_type,
+                            category,
+                        ));
+                    }
                     self.add_log(format!("Loaded {} streams", self.streams.len()));
                 }
                 Err(e) => {
@@ -2296,10 +2597,38 @@ impl App {
             _ => NavigationState::new(),
         };
 
-        self.selected_index = nav_state.selected_index;
+        // Ensure the restored index is within bounds for current items
+        self.selected_index = nav_state
+            .selected_index
+            .min(self.items.len().saturating_sub(1));
         self.scroll_offset = nav_state.scroll_offset;
-        self.search_query = nav_state.search_query;
-        self.filtered_indices = nav_state.filtered_indices;
+
+        // If the saved state has empty filtered_indices and no search query,
+        // initialize it to show all items
+        if nav_state.filtered_indices.is_empty() && nav_state.search_query.is_empty() {
+            self.filtered_indices = (0..self.items.len()).collect();
+            self.search_query = nav_state.search_query;
+        } else {
+            // Validate that filtered indices are within bounds
+            self.filtered_indices = nav_state
+                .filtered_indices
+                .into_iter()
+                .filter(|&idx| idx < self.items.len())
+                .collect();
+            self.search_query = nav_state.search_query;
+
+            // If all filtered indices were out of bounds, reset to show all
+            if self.filtered_indices.is_empty() && self.search_query.is_empty() {
+                self.filtered_indices = (0..self.items.len()).collect();
+            }
+        }
+
+        // Ensure selected index is in the filtered list
+        if !self.filtered_indices.is_empty()
+            && !self.filtered_indices.contains(&self.selected_index)
+        {
+            self.selected_index = self.filtered_indices[0];
+        }
     }
 
     fn stop_playing(&mut self) {
@@ -2419,14 +2748,15 @@ impl App {
         let visible_height = self.visible_height.max(1);
 
         // Get the actual position in the filtered list
-        let position = if self.filtered_indices.is_empty() {
-            self.selected_index
-        } else {
-            self.filtered_indices
-                .iter()
-                .position(|&i| i == self.selected_index)
-                .unwrap_or(0)
-        };
+        if self.filtered_indices.is_empty() {
+            return; // Nothing to show, nothing to scroll
+        }
+
+        let position = self
+            .filtered_indices
+            .iter()
+            .position(|&i| i == self.selected_index)
+            .unwrap_or(0);
 
         // Keep 1 line of context when scrolling (if possible)
         let context_lines = 1;
@@ -2437,11 +2767,7 @@ impl App {
         }
         // If selected item is below visible area, scroll down
         else if position >= self.scroll_offset + visible_height - context_lines {
-            let max_scroll = if self.filtered_indices.is_empty() {
-                self.items.len().saturating_sub(visible_height)
-            } else {
-                self.filtered_indices.len().saturating_sub(visible_height)
-            };
+            let max_scroll = self.filtered_indices.len().saturating_sub(visible_height);
             self.scroll_offset = (position + context_lines + 1)
                 .saturating_sub(visible_height)
                 .min(max_scroll);

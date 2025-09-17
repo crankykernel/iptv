@@ -1,51 +1,23 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
-pub struct CategoryIgnores {
+pub struct IgnoreConfig {
     #[serde(default)]
-    pub live: HashSet<String>,
+    pub categories: HashSet<String>,
     #[serde(default)]
-    pub movies: HashSet<String>,
-    #[serde(default)]
-    pub series: HashSet<String>,
+    pub channels: HashSet<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct ProviderIgnores {
-    #[serde(default)]
-    pub categories: CategoryIgnores,
-    // Future: could add ignored streams, ignored series, etc.
-}
-
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct IgnoredCategories {
-    // Structure: provider_name -> ignore types -> content_type -> Set of names
-    // This creates a nice nested JSON structure:
-    // {
-    //   "providers": {
-    //     "MegaOTT": {
-    //       "categories": {
-    //         "live": ["News", "Sports"],
-    //         "movies": ["Horror"],
-    //         "series": ["Reality TV"]
-    //       }
-    //     }
-    //   }
-    // }
-    #[serde(default)]
-    providers: HashMap<String, ProviderIgnores>,
-}
-
-impl IgnoredCategories {
+impl IgnoreConfig {
     pub fn load() -> Result<Self> {
         let path = Self::config_path()?;
         if path.exists() {
             let content = fs::read_to_string(&path)?;
-            Ok(serde_json::from_str(&content)?)
+            Ok(toml::from_str(&content)?)
         } else {
             Ok(Self::default())
         }
@@ -56,31 +28,17 @@ impl IgnoredCategories {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let content = serde_json::to_string_pretty(self)?;
+        let content = toml::to_string_pretty(self)?;
         fs::write(&path, content)?;
         Ok(())
     }
 
-    pub fn toggle_category(
-        &mut self,
-        provider: &str,
-        content_type: &str,
-        category: &str,
-    ) -> Result<bool> {
-        let provider_ignores = self.providers.entry(provider.to_string()).or_default();
-
-        let categories = match content_type {
-            "live" => &mut provider_ignores.categories.live,
-            "movies" => &mut provider_ignores.categories.movies,
-            "series" => &mut provider_ignores.categories.series,
-            _ => return Err(anyhow::anyhow!("Invalid content type: {}", content_type)),
-        };
-
-        let is_ignored = if categories.contains(category) {
-            categories.remove(category);
+    pub fn toggle_category(&mut self, category: &str) -> Result<bool> {
+        let is_ignored = if self.categories.contains(category) {
+            self.categories.remove(category);
             false
         } else {
-            categories.insert(category.to_string());
+            self.categories.insert(category.to_string());
             true
         };
 
@@ -88,33 +46,38 @@ impl IgnoredCategories {
         Ok(is_ignored)
     }
 
-    pub fn is_ignored(&self, provider: &str, content_type: &str, category: &str) -> bool {
-        self.providers
-            .get(provider)
-            .map(|provider_ignores| match content_type {
-                "live" => provider_ignores.categories.live.contains(category),
-                "movies" => provider_ignores.categories.movies.contains(category),
-                "series" => provider_ignores.categories.series.contains(category),
-                _ => false,
-            })
-            .unwrap_or(false)
+    pub fn toggle_channel(&mut self, channel: &str) -> Result<bool> {
+        let is_ignored = if self.channels.contains(channel) {
+            self.channels.remove(channel);
+            false
+        } else {
+            self.channels.insert(channel.to_string());
+            true
+        };
+
+        self.save()?;
+        Ok(is_ignored)
     }
 
-    pub fn get_ignored_for_provider(&self, provider: &str, content_type: &str) -> HashSet<String> {
-        self.providers
-            .get(provider)
-            .map(|provider_ignores| match content_type {
-                "live" => provider_ignores.categories.live.clone(),
-                "movies" => provider_ignores.categories.movies.clone(),
-                "series" => provider_ignores.categories.series.clone(),
-                _ => HashSet::new(),
-            })
-            .unwrap_or_default()
+    pub fn is_category_ignored(&self, category: &str) -> bool {
+        self.categories.contains(category)
+    }
+
+    pub fn is_channel_ignored(&self, channel: &str) -> bool {
+        self.channels.contains(channel)
+    }
+
+    pub fn get_ignored_categories(&self) -> &HashSet<String> {
+        &self.categories
+    }
+
+    pub fn get_ignored_channels(&self) -> &HashSet<String> {
+        &self.channels
     }
 
     fn config_path() -> Result<PathBuf> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
-        Ok(config_dir.join("iptv").join("ignored.json"))
+        Ok(config_dir.join("iptv").join("ignore.toml"))
     }
 }
