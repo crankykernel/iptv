@@ -506,6 +506,95 @@ impl XTreamAPI {
         self.logger = None; // Clear any logger to allow progress bars
     }
 
+    /// Make a raw API request and return the JSON response without deserialization
+    pub async fn make_request_raw(
+        &self,
+        action: &str,
+        category_id: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let mut url = format!(
+            "{}/player_api.php?username={}&password={}&action={}",
+            self.base_url, self.username, self.password, action
+        );
+
+        if let Some(cat_id) = category_id {
+            url.push_str(&format!("&category_id={}", cat_id));
+        }
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("Failed to send request to {}", url))?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "HTTP request failed with status: {}",
+                response.status()
+            ));
+        }
+
+        let response_text = response.text().await?;
+
+        if response_text.trim().is_empty() {
+            return Err(anyhow::anyhow!("Empty response from server"));
+        }
+
+        // Parse as raw JSON value
+        let json: serde_json::Value = serde_json::from_str(&response_text)
+            .with_context(|| "Failed to parse response as JSON")?;
+
+        Ok(json)
+    }
+
+    /// Make a raw API request for series/vod info and return the JSON response
+    pub async fn make_info_request_raw(
+        &self,
+        endpoint: &str,
+        id: u32,
+    ) -> Result<serde_json::Value> {
+        let url = format!(
+            "{}/player_api.php?username={}&password={}&action={}&{}_id={}",
+            self.base_url,
+            self.username,
+            self.password,
+            endpoint,
+            if endpoint == "get_series_info" {
+                "series"
+            } else {
+                "vod"
+            },
+            id
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("Failed to send request to {}", url))?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "HTTP request failed with status: {}",
+                response.status()
+            ));
+        }
+
+        let response_text = response.text().await?;
+
+        if response_text.trim().is_empty() {
+            return Err(anyhow::anyhow!("Empty response from server"));
+        }
+
+        // Parse as raw JSON value
+        let json: serde_json::Value = serde_json::from_str(&response_text)
+            .with_context(|| "Failed to parse response as JSON")?;
+
+        Ok(json)
+    }
+
     async fn make_request<T>(&self, action: &str, category_id: Option<&str>) -> Result<T>
     where
         T: for<'de> Deserialize<'de>,

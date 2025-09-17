@@ -578,22 +578,26 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
 }
 
 async fn run_api_command(_provider: &str, api: &mut XTreamAPI, cmd: ApiCommand) -> Result<()> {
+    // Return raw JSON responses without any interpretation or deserialization
     let result = match cmd {
-        ApiCommand::UserInfo => serde_json::to_value(api.get_user_info().await?)?,
-        ApiCommand::LiveCategories => serde_json::to_value(api.get_live_categories().await?)?,
-        ApiCommand::VodCategories => serde_json::to_value(api.get_vod_categories().await?)?,
-        ApiCommand::SeriesCategories => serde_json::to_value(api.get_series_categories().await?)?,
+        ApiCommand::UserInfo => api.make_request_raw("get_user_info", None).await?,
+        ApiCommand::LiveCategories => api.make_request_raw("get_live_categories", None).await?,
+        ApiCommand::VodCategories => api.make_request_raw("get_vod_categories", None).await?,
+        ApiCommand::SeriesCategories => api.make_request_raw("get_series_categories", None).await?,
         ApiCommand::LiveStreams { category } => {
-            serde_json::to_value(api.get_live_streams(category.as_deref()).await?)?
+            api.make_request_raw("get_live_streams", category.as_deref())
+                .await?
         }
         ApiCommand::VodStreams { category } => {
-            serde_json::to_value(api.get_vod_streams(category.as_deref()).await?)?
+            api.make_request_raw("get_vod_streams", category.as_deref())
+                .await?
         }
         ApiCommand::Series { category } => {
-            serde_json::to_value(api.get_series(category.as_deref()).await?)?
+            api.make_request_raw("get_series", category.as_deref())
+                .await?
         }
-        ApiCommand::SeriesInfo { id } => serde_json::to_value(api.get_series_info(id).await?)?,
-        ApiCommand::VodInfo { id } => serde_json::to_value(api.get_vod_info(id).await?)?,
+        ApiCommand::SeriesInfo { id } => api.make_info_request_raw("get_series_info", id).await?,
+        ApiCommand::VodInfo { id } => api.make_info_request_raw("get_vod_info", id).await?,
     };
 
     println!("{}", serde_json::to_string_pretty(&result)?);
