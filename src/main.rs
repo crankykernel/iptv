@@ -838,10 +838,8 @@ async fn main() -> Result<()> {
         }
 
         Some(Commands::Api(api_cmds)) => {
-            // Use provider from command line option or fall back to env var
-            let selected_provider = api_cmds
-                .provider
-                .or_else(|| std::env::var("IPTV_PROVIDER").ok());
+            // Use provider from command line option only
+            let selected_provider = api_cmds.provider;
 
             // Create command context with case-insensitive provider selection
             let context = CommandContext::new(config.providers.clone(), selected_provider, false);
