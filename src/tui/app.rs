@@ -876,6 +876,13 @@ impl App {
                         }
                     }
                 }
+                KeyCode::Char('t') => {
+                    // Play in terminal for debugging
+                    if self.selected_index < self.streams.len() {
+                        let stream = self.streams[self.selected_index].clone();
+                        self.play_stream_in_terminal(&stream).await;
+                    }
+                }
                 KeyCode::Esc | KeyCode::Char('b') => {
                     // If there's an active filter, clear it instead of going back
                     if !self.search_query.is_empty() {
@@ -1246,6 +1253,100 @@ impl App {
                         }
                     }
                 }
+                KeyCode::Char('d') => {
+                    // Play cross-provider favourite in detached window
+                    if self.selected_index < self.cross_provider_favourites.len() {
+                        let (favourite, provider) =
+                            self.cross_provider_favourites[self.selected_index].clone();
+
+                        // Connect to provider silently if needed (without changing state)
+                        if self.current_api.is_none()
+                            || self.current_api.as_ref().unwrap().provider_hash
+                                != crate::XTreamAPI::new(
+                                    provider.url.clone(),
+                                    provider.username.clone(),
+                                    provider.password.clone(),
+                                    provider.name.clone(),
+                                )
+                                .unwrap()
+                                .provider_hash
+                        {
+                            self.add_log(format!(
+                                "Connecting to provider: {}",
+                                provider.name.as_ref().unwrap_or(&provider.url)
+                            ));
+
+                            match crate::XTreamAPI::new(
+                                provider.url.clone(),
+                                provider.username.clone(),
+                                provider.password.clone(),
+                                provider.name.clone(),
+                            ) {
+                                Ok(mut api) => {
+                                    api.disable_progress();
+                                    self.current_api = Some(api);
+                                    self.add_log("Successfully connected to provider".to_string());
+                                }
+                                Err(e) => {
+                                    self.state =
+                                        AppState::Error(format!("Failed to connect: {}", e));
+                                    self.add_log(format!("Connection failed: {}", e));
+                                    return None;
+                                }
+                            }
+                        }
+
+                        // Play the favourite in detached window
+                        self.play_favourite_detached(&favourite).await;
+                    }
+                }
+                KeyCode::Char('t') => {
+                    // Play cross-provider favourite in terminal for debugging
+                    if self.selected_index < self.cross_provider_favourites.len() {
+                        let (favourite, provider) =
+                            self.cross_provider_favourites[self.selected_index].clone();
+
+                        // Connect to provider silently if needed (without changing state)
+                        if self.current_api.is_none()
+                            || self.current_api.as_ref().unwrap().provider_hash
+                                != crate::XTreamAPI::new(
+                                    provider.url.clone(),
+                                    provider.username.clone(),
+                                    provider.password.clone(),
+                                    provider.name.clone(),
+                                )
+                                .unwrap()
+                                .provider_hash
+                        {
+                            self.add_log(format!(
+                                "Connecting to provider: {}",
+                                provider.name.as_ref().unwrap_or(&provider.url)
+                            ));
+
+                            match crate::XTreamAPI::new(
+                                provider.url.clone(),
+                                provider.username.clone(),
+                                provider.password.clone(),
+                                provider.name.clone(),
+                            ) {
+                                Ok(mut api) => {
+                                    api.disable_progress();
+                                    self.current_api = Some(api);
+                                    self.add_log("Successfully connected to provider".to_string());
+                                }
+                                Err(e) => {
+                                    self.state =
+                                        AppState::Error(format!("Failed to connect: {}", e));
+                                    self.add_log(format!("Connection failed: {}", e));
+                                    return None;
+                                }
+                            }
+                        }
+
+                        // Play the favourite in terminal for debugging
+                        self.play_favourite_in_terminal(&favourite).await;
+                    }
+                }
                 KeyCode::Char('f') => {
                     if self.selected_index < self.cross_provider_favourites.len() {
                         let (favourite, provider) =
@@ -1326,6 +1427,13 @@ impl App {
                     if self.selected_index < self.favourites.len() {
                         let fav = self.favourites[self.selected_index].clone();
                         self.play_favourite_detached(&fav).await;
+                    }
+                }
+                KeyCode::Char('t') => {
+                    // Play favourite in terminal for debugging
+                    if self.selected_index < self.favourites.len() {
+                        let fav = self.favourites[self.selected_index].clone();
+                        self.play_favourite_in_terminal(&fav).await;
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
@@ -2200,6 +2308,35 @@ impl App {
         }
     }
 
+    async fn play_stream_in_terminal(&mut self, stream: &Stream) {
+        self.add_log(format!("Playing in debug terminal: {}", stream.name));
+
+        if let Some(api) = &self.current_api {
+            let url = api.get_stream_url(
+                stream.stream_id,
+                if stream.stream_type == "live" {
+                    "live"
+                } else {
+                    "movie"
+                },
+                stream.container_extension.as_deref(),
+            );
+
+            // Log the stream URL to the logs panel
+            self.add_log(format!("Stream URL: {}", url));
+            self.add_log("Launching MPV in terminal for debug output".to_string());
+
+            // Use terminal play method for debugging
+            if let Err(e) = self.player.play_in_terminal(&url).await {
+                self.state = AppState::Error(format!("Failed to launch terminal: {}", e));
+                self.add_log(format!("Terminal launch failed: {}", e));
+            } else {
+                self.add_log("MPV launched in terminal with verbose output".to_string());
+                self.add_log("Check the terminal window for debug information".to_string());
+            }
+        }
+    }
+
     async fn play_episode(&mut self, episode: &ApiEpisode) {
         // Store the current state to return to after starting playback
         let return_state = self.state.clone();
@@ -2296,6 +2433,28 @@ impl App {
             } else {
                 self.add_log("Favourite started in new independent window".to_string());
                 self.add_log("This window won't be affected by other playback".to_string());
+            }
+        }
+    }
+
+    async fn play_favourite_in_terminal(&mut self, fav: &FavouriteStream) {
+        self.add_log(format!("Playing favourite in debug terminal: {}", fav.name));
+
+        if let Some(api) = &self.current_api {
+            // Construct the stream URL from the favourite stream ID
+            let url = api.get_stream_url(fav.stream_id, &fav.stream_type, None);
+
+            // Log the stream URL
+            self.add_log(format!("Stream URL: {}", url));
+            self.add_log("Launching MPV in terminal for debug output".to_string());
+
+            // Use terminal play method for debugging
+            if let Err(e) = self.player.play_in_terminal(&url).await {
+                self.state = AppState::Error(format!("Failed to launch terminal: {}", e));
+                self.add_log(format!("Terminal launch failed: {}", e));
+            } else {
+                self.add_log("MPV launched in terminal with verbose output".to_string());
+                self.add_log("Check the terminal window for debug information".to_string());
             }
         }
     }

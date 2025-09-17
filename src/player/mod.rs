@@ -144,6 +144,71 @@ impl Player {
         Ok(())
     }
 
+    /// Play video in terminal for debugging - shows MPV output
+    pub async fn play_in_terminal(&self, url: &str) -> Result<()> {
+        if !self.use_mpv {
+            return Err(anyhow::anyhow!(
+                "MPV is not installed. Please install MPV to use this application."
+            ));
+        }
+
+        // Launch MPV in a terminal window to see all output
+        // Try different terminal emulators in order of preference
+        let terminals = [
+            ("alacritty", vec!["-e"]),
+            ("kitty", vec![]),
+            ("konsole", vec!["-e"]),
+            ("gnome-terminal", vec!["--"]),
+            ("xfce4-terminal", vec!["-x"]),
+            ("mate-terminal", vec!["-x"]),
+            ("xterm", vec!["-e"]),
+        ];
+
+        let mut terminal_cmd = None;
+        for (term, args) in terminals.iter() {
+            if Command::new(term)
+                .arg("--version")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+            {
+                terminal_cmd = Some((term.to_string(), args.clone()));
+                break;
+            }
+        }
+
+        let (terminal, term_args) = terminal_cmd.ok_or_else(|| {
+            anyhow::anyhow!("No terminal emulator found. Please install one of: alacritty, kitty, konsole, gnome-terminal, xfce4-terminal, mate-terminal, or xterm")
+        })?;
+
+        let mut cmd = Command::new(&terminal);
+
+        // Add terminal-specific arguments
+        for arg in term_args {
+            cmd.arg(arg);
+        }
+
+        // Add MPV command with visible output
+        cmd.arg("mpv")
+            .arg(url)
+            .arg("--force-window=yes")
+            .arg("--keep-open=yes")
+            .arg("--title=IPTV Stream (Debug Terminal)")
+            .arg("--geometry=1280x720")
+            .arg("--autofit-larger=90%x90%")
+            .arg("-v") // Verbose output for debugging
+            .stdin(Stdio::null());
+
+        cmd.spawn().context(format!(
+            "Failed to start {} with MPV for debugging",
+            terminal
+        ))?;
+
+        Ok(())
+    }
+
     /// Play video in detached mode for rofi - starts MPV with RPC then exits
     pub async fn play_detached(&self, url: &str) -> Result<()> {
         if !self.use_mpv {

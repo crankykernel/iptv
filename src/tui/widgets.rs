@@ -52,6 +52,7 @@ pub fn create_help_widget() -> Paragraph<'static> {
         Line::from("  End       - Jump to last"),
         Line::from("  Enter     - Select item / Play stream"),
         Line::from("  d         - Play in detached window (streams/episodes)"),
+        Line::from("  t         - Play in terminal (debug mode, shows MPV output)"),
         Line::from("  Esc/b     - Go back"),
         Line::from("  q         - Quit application"),
         Line::from(""),
