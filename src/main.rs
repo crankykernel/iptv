@@ -58,8 +58,7 @@ enum Commands {
     Cli(CliCommands),
 
     /// Execute raw API calls
-    #[command(subcommand)]
-    Api(ApiCommand),
+    Api(ApiCommands),
 }
 
 #[derive(Parser)]
@@ -265,8 +264,19 @@ enum ProvidersSubCommand {
     },
 }
 
+#[derive(Parser)]
+#[command(styles = cargo_style())]
+struct ApiCommands {
+    /// Provider name to use (case-insensitive)
+    #[arg(short, long)]
+    provider: Option<String>,
+
+    #[command(subcommand)]
+    command: ApiSubcommand,
+}
+
 #[derive(Subcommand)]
-enum ApiCommand {
+enum ApiSubcommand {
     /// Get user info
     UserInfo,
     /// Get live categories
@@ -577,27 +587,31 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
     Ok(())
 }
 
-async fn run_api_command(_provider: &str, api: &mut XTreamAPI, cmd: ApiCommand) -> Result<()> {
+async fn run_api_command(_provider: &str, api: &mut XTreamAPI, cmd: ApiSubcommand) -> Result<()> {
     // Return raw JSON responses without any interpretation or deserialization
     let result = match cmd {
-        ApiCommand::UserInfo => api.make_request_raw("get_user_info", None).await?,
-        ApiCommand::LiveCategories => api.make_request_raw("get_live_categories", None).await?,
-        ApiCommand::VodCategories => api.make_request_raw("get_vod_categories", None).await?,
-        ApiCommand::SeriesCategories => api.make_request_raw("get_series_categories", None).await?,
-        ApiCommand::LiveStreams { category } => {
+        ApiSubcommand::UserInfo => api.make_request_raw("get_user_info", None).await?,
+        ApiSubcommand::LiveCategories => api.make_request_raw("get_live_categories", None).await?,
+        ApiSubcommand::VodCategories => api.make_request_raw("get_vod_categories", None).await?,
+        ApiSubcommand::SeriesCategories => {
+            api.make_request_raw("get_series_categories", None).await?
+        }
+        ApiSubcommand::LiveStreams { category } => {
             api.make_request_raw("get_live_streams", category.as_deref())
                 .await?
         }
-        ApiCommand::VodStreams { category } => {
+        ApiSubcommand::VodStreams { category } => {
             api.make_request_raw("get_vod_streams", category.as_deref())
                 .await?
         }
-        ApiCommand::Series { category } => {
+        ApiSubcommand::Series { category } => {
             api.make_request_raw("get_series", category.as_deref())
                 .await?
         }
-        ApiCommand::SeriesInfo { id } => api.make_info_request_raw("get_series_info", id).await?,
-        ApiCommand::VodInfo { id } => api.make_info_request_raw("get_vod_info", id).await?,
+        ApiSubcommand::SeriesInfo { id } => {
+            api.make_info_request_raw("get_series_info", id).await?
+        }
+        ApiSubcommand::VodInfo { id } => api.make_info_request_raw("get_vod_info", id).await?,
     };
 
     println!("{}", serde_json::to_string_pretty(&result)?);
@@ -823,16 +837,18 @@ async fn main() -> Result<()> {
             run_rofi_menu(config.providers, player).await?;
         }
 
-        Some(Commands::Api(api_cmd)) => {
-            // Get provider from env var for API commands
-            let selected_provider = std::env::var("IPTV_PROVIDER").ok();
+        Some(Commands::Api(api_cmds)) => {
+            // Use provider from command line option or fall back to env var
+            let selected_provider = api_cmds
+                .provider
+                .or_else(|| std::env::var("IPTV_PROVIDER").ok());
 
-            // Create command context
+            // Create command context with case-insensitive provider selection
             let context = CommandContext::new(config.providers.clone(), selected_provider, false);
 
             let (mut api, provider_name) = context.get_single_provider().await?;
             eprintln!("Using provider: {}", provider_name);
-            run_api_command(&provider_name, &mut api, api_cmd).await?;
+            run_api_command(&provider_name, &mut api, api_cmds.command).await?;
         }
     }
 

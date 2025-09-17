@@ -67,10 +67,15 @@ impl CommandContext {
         }
 
         let provider = if let Some(name) = &self.selected_provider {
-            // Find provider by name
+            // Find provider by name (case-insensitive)
             self.providers
                 .iter()
-                .find(|p| p.name.as_ref() == Some(name))
+                .find(|p| {
+                    p.name
+                        .as_ref()
+                        .map(|n| n.to_lowercase() == name.to_lowercase())
+                        .unwrap_or(false)
+                })
                 .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", name))?
         } else if self.providers.len() == 1 {
             // Auto-select single provider
