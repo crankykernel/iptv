@@ -1240,6 +1240,9 @@ impl App {
 
                             self.add_log(format!("Playing: {}", favourite.name));
 
+                            // Log the stream URL to the logs panel
+                            self.add_log(format!("Stream URL: {}", stream_url));
+
                             // Use TUI-specific play method that runs in background
                             if let Err(e) = self.player.play_tui(&stream_url).await {
                                 self.state =
