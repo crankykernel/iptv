@@ -144,7 +144,7 @@ impl Player {
         Ok(())
     }
 
-    /// Play video in terminal for debugging - shows MPV output
+    /// Play video in terminal for debugging - shows MPV output with RPC support
     pub async fn play_in_terminal(&self, url: &str) -> Result<()> {
         if !self.use_mpv {
             return Err(anyhow::anyhow!(
@@ -152,7 +152,36 @@ impl Player {
             ));
         }
 
-        // Launch MPV in a terminal window to see all output
+        // First try to connect to an existing MPV instance
+        if let Some(existing_mpv) = MpvPlayer::try_connect_existing().await {
+            debug!("Found existing MPV instance via RPC, sending new stream");
+            existing_mpv.play(url).await?;
+            println!("Sent stream to existing MPV instance via RPC");
+            return Ok(());
+        }
+
+        // No existing instance, launch MPV in a terminal to see output
+        // But with IPC socket enabled for future RPC connections
+        let socket_path = std::env::var("XDG_STATE_HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                let home = std::env::var("HOME").expect("HOME environment variable not set");
+                std::path::PathBuf::from(home).join(".local").join("state")
+            })
+            .join("iptv")
+            .join("mpv.sock");
+
+        // Ensure the directory exists
+        if let Some(parent) = socket_path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+
+        // Clean up old socket if it exists
+        if socket_path.exists() {
+            let _ = std::fs::remove_file(&socket_path);
+        }
+
         // Try different terminal emulators in order of preference
         let terminals = [
             ("alacritty", vec!["-e"]),
@@ -190,14 +219,18 @@ impl Player {
             cmd.arg(arg);
         }
 
-        // Add MPV command with visible output
+        // Add MPV command with visible output AND IPC socket for RPC
         cmd.arg("mpv")
             .arg(url)
+            .arg(format!("--input-ipc-server={}", socket_path.display()))
+            .arg("--idle=yes") // Keep running for new streams
             .arg("--force-window=yes")
             .arg("--keep-open=yes")
-            .arg("--title=IPTV Stream (Debug Terminal)")
+            .arg("--title=IPTV Stream (Terminal)")
             .arg("--geometry=1280x720")
             .arg("--autofit-larger=90%x90%")
+            .arg("--osc=yes")
+            .arg("--osd-bar=yes")
             .arg("-v") // Verbose output for debugging
             .stdin(Stdio::null());
 
@@ -205,6 +238,9 @@ impl Player {
             "Failed to start {} with MPV for debugging",
             terminal
         ))?;
+
+        println!("Started MPV in terminal with RPC support");
+        println!("New streams will be sent to this instance via RPC");
 
         Ok(())
     }
