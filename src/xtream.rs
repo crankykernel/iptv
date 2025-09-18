@@ -144,7 +144,7 @@ pub struct Stream {
     pub stream_icon: Option<String>,
     #[serde(default)]
     pub epg_channel_id: Option<Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_number_as_string")]
     pub added: Option<String>,
     #[serde(default)]
     pub category_id: Option<String>,
