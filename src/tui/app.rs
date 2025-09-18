@@ -2400,6 +2400,9 @@ impl App {
             // Construct the stream URL from the favourite stream ID
             let url = api.get_stream_url(fav.stream_id, &fav.stream_type, None);
 
+            // Log the stream URL to the logs panel
+            self.add_log(format!("Stream URL: {}", url));
+
             // Use TUI-specific play method that runs in background
             if let Err(e) = self.player.play_tui(&url).await {
                 self.state = AppState::Error(format!("Failed to play favourite: {}", e));
