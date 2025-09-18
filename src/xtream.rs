@@ -454,6 +454,16 @@ impl XTreamAPI {
         password: String,
         provider_name: Option<String>,
     ) -> Result<Self> {
+        Self::new_with_id(server_url, username, password, provider_name, None)
+    }
+
+    pub fn new_with_id(
+        server_url: String,
+        username: String,
+        password: String,
+        provider_name: Option<String>,
+        provider_id: Option<String>,
+    ) -> Result<Self> {
         let url = reqwest::Url::parse(&server_url).with_context(|| "Invalid server URL")?;
 
         let base_url = if let Some(port) = url.port() {
@@ -471,8 +481,22 @@ impl XTreamAPI {
             )
         };
 
+        // Use provider_id if provided, otherwise use provider_name, otherwise generate from URL
+        let provider_identifier = if let Some(id) = provider_id {
+            id
+        } else if let Some(name) = provider_name.as_ref() {
+            name.clone()
+        } else {
+            // Fallback to hostname:port for backward compatibility
+            if let Some(port) = url.port() {
+                format!("{}:{}", url.host_str().unwrap_or("localhost"), port)
+            } else {
+                url.host_str().unwrap_or("localhost").to_string()
+            }
+        };
+
         let mut cache_manager = CacheManager::new()?;
-        let provider_hash = cache_manager.get_provider_hash(&base_url, provider_name.as_deref())?;
+        let provider_hash = cache_manager.get_provider_hash(&provider_identifier, None)?;
         let favourites_manager = FavouritesManager::new()?;
 
         Ok(Self {

@@ -90,11 +90,12 @@ impl CommandContext {
             .clone()
             .unwrap_or_else(|| format!("{}@{}", provider.username, provider.url));
 
-        let api = XTreamAPI::new(
+        let api = XTreamAPI::new_with_id(
             provider.url.clone(),
             provider.username.clone(),
             provider.password.clone(),
             Some(provider_name.clone()),
+            provider.id.clone(),
         )?;
 
         Ok((api, provider_name))
@@ -110,11 +111,12 @@ impl CommandContext {
                 .clone()
                 .unwrap_or_else(|| format!("{}@{}", provider.username, provider.url));
 
-            let api = XTreamAPI::new(
+            let api = XTreamAPI::new_with_id(
                 provider.url.clone(),
                 provider.username.clone(),
                 provider.password.clone(),
                 Some(provider_name.clone()),
+                provider.id.clone(),
             )?;
 
             apis.push((api, provider_name));

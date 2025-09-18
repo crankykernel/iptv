@@ -140,7 +140,7 @@ impl App {
 
     pub fn new(providers: Vec<ProviderConfig>, player: Player) -> Self {
         let items = if providers.len() > 1 {
-            let mut items = vec!["All Favourites".to_string()];
+            let mut items = vec!["Favourites".to_string()];
             items.extend(
                 providers
                     .iter()
@@ -369,9 +369,15 @@ impl App {
         match self.state.clone() {
             AppState::Error(_) => {
                 if key.code == KeyCode::Enter || key.code == KeyCode::Esc {
-                    self.state = AppState::MainMenu;
-                    self.restore_navigation_state(&AppState::MainMenu);
-                    self.update_main_menu_items();
+                    // Return to provider selection if no provider is connected
+                    if self.current_api.is_none() {
+                        self.state = AppState::ProviderSelection;
+                        self.restore_navigation_state(&AppState::ProviderSelection);
+                    } else {
+                        self.state = AppState::MainMenu;
+                        self.restore_navigation_state(&AppState::MainMenu);
+                        self.update_main_menu_items();
+                    }
                 }
             }
             AppState::ProviderSelection => match key.code {
@@ -383,7 +389,7 @@ impl App {
                 KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Enter => {
                     if self.selected_index == 0 {
-                        // All Favourites selected
+                        // Favourites selected
                         self.save_current_navigation_state();
                         self.load_all_favourites().await;
                     } else if self.selected_index - 1 < self.providers.len() {
@@ -1191,11 +1197,12 @@ impl App {
                         // Connect to provider silently if needed (without changing state)
                         if self.current_api.is_none()
                             || self.current_api.as_ref().unwrap().provider_hash
-                                != crate::XTreamAPI::new(
+                                != crate::XTreamAPI::new_with_id(
                                     provider.url.clone(),
                                     provider.username.clone(),
                                     provider.password.clone(),
                                     provider.name.clone(),
+                                    provider.id.clone(),
                                 )
                                 .unwrap()
                                 .provider_hash
@@ -1205,11 +1212,12 @@ impl App {
                                 provider.name.as_ref().unwrap_or(&provider.url)
                             ));
 
-                            match crate::XTreamAPI::new(
+                            match crate::XTreamAPI::new_with_id(
                                 provider.url.clone(),
                                 provider.username.clone(),
                                 provider.password.clone(),
                                 provider.name.clone(),
+                                provider.id.clone(),
                             ) {
                                 Ok(mut api) => {
                                     api.disable_progress();
@@ -1260,11 +1268,12 @@ impl App {
                         // Connect to provider silently if needed (without changing state)
                         if self.current_api.is_none()
                             || self.current_api.as_ref().unwrap().provider_hash
-                                != crate::XTreamAPI::new(
+                                != crate::XTreamAPI::new_with_id(
                                     provider.url.clone(),
                                     provider.username.clone(),
                                     provider.password.clone(),
                                     provider.name.clone(),
+                                    provider.id.clone(),
                                 )
                                 .unwrap()
                                 .provider_hash
@@ -1274,11 +1283,12 @@ impl App {
                                 provider.name.as_ref().unwrap_or(&provider.url)
                             ));
 
-                            match crate::XTreamAPI::new(
+                            match crate::XTreamAPI::new_with_id(
                                 provider.url.clone(),
                                 provider.username.clone(),
                                 provider.password.clone(),
                                 provider.name.clone(),
+                                provider.id.clone(),
                             ) {
                                 Ok(mut api) => {
                                     api.disable_progress();
@@ -1307,11 +1317,12 @@ impl App {
                         // Connect to provider silently if needed (without changing state)
                         if self.current_api.is_none()
                             || self.current_api.as_ref().unwrap().provider_hash
-                                != crate::XTreamAPI::new(
+                                != crate::XTreamAPI::new_with_id(
                                     provider.url.clone(),
                                     provider.username.clone(),
                                     provider.password.clone(),
                                     provider.name.clone(),
+                                    provider.id.clone(),
                                 )
                                 .unwrap()
                                 .provider_hash
@@ -1321,11 +1332,12 @@ impl App {
                                 provider.name.as_ref().unwrap_or(&provider.url)
                             ));
 
-                            match crate::XTreamAPI::new(
+                            match crate::XTreamAPI::new_with_id(
                                 provider.url.clone(),
                                 provider.username.clone(),
                                 provider.password.clone(),
                                 provider.name.clone(),
+                                provider.id.clone(),
                             ) {
                                 Ok(mut api) => {
                                     api.disable_progress();
@@ -1357,11 +1369,12 @@ impl App {
                             }
                         };
 
-                        let api = match crate::XTreamAPI::new(
+                        let api = match crate::XTreamAPI::new_with_id(
                             provider.url.clone(),
                             provider.username.clone(),
                             provider.password.clone(),
                             provider.name.clone(),
+                            provider.id.clone(),
                         ) {
                             Ok(mut api) => {
                                 api.disable_progress();
@@ -1510,11 +1523,12 @@ impl App {
             provider.name.as_ref().unwrap_or(&provider.url)
         ));
 
-        match XTreamAPI::new(
+        match XTreamAPI::new_with_id(
             provider.url.clone(),
             provider.username.clone(),
             provider.password.clone(),
             provider.name.clone(),
+            provider.id.clone(),
         ) {
             Ok(mut api) => {
                 // Set up logger for TUI mode
@@ -1550,7 +1564,7 @@ impl App {
     }
 
     fn update_provider_items(&mut self) {
-        let mut items = vec!["All Favourites".to_string()];
+        let mut items = vec!["Favourites".to_string()];
         items.extend(
             self.providers
                 .iter()
@@ -1565,7 +1579,7 @@ impl App {
 
         // Only show Favourites in main menu when there's a single provider
         if self.providers.len() == 1 {
-            menu_items.push("All Favourites".to_string());
+            menu_items.push("Favourites".to_string());
         }
 
         menu_items.extend(vec![
@@ -2053,7 +2067,7 @@ impl App {
     async fn load_all_favourites(&mut self) {
         self.state = AppState::Loading("Loading all favourites...".to_string());
         self.add_log("Loading favourites from all providers".to_string());
-        self.current_provider_name = Some("All Favourites".to_string());
+        self.current_provider_name = Some("Favourites".to_string());
 
         let favourites_manager = match crate::FavouritesManager::new() {
             Ok(fm) => fm,
@@ -2069,11 +2083,12 @@ impl App {
         // Collect favourites from all providers
         let providers = self.providers.clone();
         for provider in &providers {
-            let api = match crate::XTreamAPI::new(
+            let api = match crate::XTreamAPI::new_with_id(
                 provider.url.clone(),
                 provider.username.clone(),
                 provider.password.clone(),
                 provider.name.clone(),
+                provider.id.clone(),
             ) {
                 Ok(mut api) => {
                     api.disable_progress();

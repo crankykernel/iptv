@@ -366,6 +366,7 @@ async fn add_provider_interactively(config_path: PathBuf) -> Result<()> {
 
     // Add the new provider
     let provider = ProviderConfig {
+        id: None,
         name: Some(name.clone()),
         url,
         username,
@@ -427,11 +428,12 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
             provider.name.as_ref().unwrap_or(&provider.url)
         );
 
-        let api = XTreamAPI::new(
+        let api = XTreamAPI::new_with_id(
             provider.url.clone(),
             provider.username.clone(),
             provider.password.clone(),
             provider.name.clone(),
+            provider.id.clone(),
         )?;
 
         // Get favourites from this provider using the provider hash from the API
@@ -552,11 +554,12 @@ async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result
 
     if let Some(fav_with_provider) = selected_fav {
         // Create API for the selected provider
-        let api = XTreamAPI::new(
+        let api = XTreamAPI::new_with_id(
             fav_with_provider.provider_config.url.clone(),
             fav_with_provider.provider_config.username.clone(),
             fav_with_provider.provider_config.password.clone(),
             fav_with_provider.provider_config.name.clone(),
+            fav_with_provider.provider_config.id.clone(),
         )?;
 
         // Get the stream URL based on stream type
