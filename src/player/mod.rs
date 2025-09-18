@@ -70,8 +70,8 @@ impl Player {
 
         // For CLI mode, use the same TUI method for consistent RPC behavior
         self.play_tui(url).await?;
-        println!("▶️  Playing in background...");
-        println!("You can continue browsing or start another stream.");
+        // Don't use println! as it can corrupt TUI display if called from TUI mode
+        debug!("Playing in background...");
         Ok(())
     }
 
@@ -156,7 +156,8 @@ impl Player {
         if let Some(existing_mpv) = MpvPlayer::try_connect_existing().await {
             debug!("Found existing MPV instance via RPC, sending new stream");
             existing_mpv.play(url).await?;
-            println!("Sent stream to existing MPV instance via RPC");
+            // Don't use println! as it corrupts the TUI display
+            debug!("Sent stream to existing MPV instance via RPC");
             return Ok(());
         }
 
@@ -239,8 +240,9 @@ impl Player {
             terminal
         ))?;
 
-        println!("Started MPV in terminal with RPC support");
-        println!("New streams will be sent to this instance via RPC");
+        // Don't use println! as it corrupts TUI display
+        debug!("Started MPV in terminal with RPC support");
+        debug!("New streams will be sent to this instance via RPC");
 
         Ok(())
     }

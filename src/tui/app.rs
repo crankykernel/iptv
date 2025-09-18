@@ -77,6 +77,7 @@ pub enum AppState {
     SeasonSelection(Stream),
     EpisodeSelection(Stream, TuiSeason),
     CrossProviderFavourites,
+    StreamAdvancedMenu(Stream, ContentType),
     Loading(String),
     Error(String),
     Playing(String),
@@ -129,6 +130,9 @@ pub struct App {
     season_selection_state: NavigationState,
     cross_provider_favourites_state: NavigationState,
     ignore_config: IgnoreConfig,
+    previous_state_before_menu: Option<Box<AppState>>,
+    previous_items_before_menu: Vec<String>,
+    previous_nav_before_menu: NavigationState,
 }
 
 impl App {
@@ -196,6 +200,9 @@ impl App {
             season_selection_state: NavigationState::new(),
             cross_provider_favourites_state: NavigationState::new(),
             ignore_config: IgnoreConfig::load().unwrap_or_default(),
+            previous_state_before_menu: None,
+            previous_items_before_menu: Vec::new(),
+            previous_nav_before_menu: NavigationState::new(),
         }
     }
 
@@ -863,25 +870,12 @@ impl App {
                         }
                     }
                 }
-                KeyCode::Char('d') => {
-                    // Play in detached window (for live streams only)
-                    if self.selected_index < self.streams.len() {
+                KeyCode::Char('a') => {
+                    // Show advanced menu for live streams
+                    if content_type == ContentType::Live && self.selected_index < self.streams.len()
+                    {
                         let stream = self.streams[self.selected_index].clone();
-                        match content_type {
-                            ContentType::Live => {
-                                self.play_stream_detached(&stream).await;
-                            }
-                            _ => {
-                                // For series and movies, 'd' doesn't apply at this level
-                            }
-                        }
-                    }
-                }
-                KeyCode::Char('t') => {
-                    // Play in terminal for debugging
-                    if self.selected_index < self.streams.len() {
-                        let stream = self.streams[self.selected_index].clone();
-                        self.play_stream_in_terminal(&stream).await;
+                        self.show_stream_advanced_menu(stream, content_type).await;
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
@@ -1168,13 +1162,6 @@ impl App {
                         self.play_episode(&episode).await;
                     }
                 }
-                KeyCode::Char('d') => {
-                    // Play episode in detached window
-                    if self.selected_index < self.episodes.len() {
-                        let episode = self.episodes[self.selected_index].clone();
-                        self.play_episode_detached(&episode).await;
-                    }
-                }
                 KeyCode::Esc | KeyCode::Char('b') => {
                     self.save_current_navigation_state();
                     self.state = AppState::SeasonSelection(series.clone());
@@ -1259,102 +1246,73 @@ impl App {
                         }
                     }
                 }
-                KeyCode::Char('d') => {
-                    // Play cross-provider favourite in detached window
+                KeyCode::Char('a') => {
+                    // Show advanced menu for live streams in favorites
                     if self.selected_index < self.cross_provider_favourites.len() {
                         let (favourite, provider) =
                             self.cross_provider_favourites[self.selected_index].clone();
 
-                        // Connect to provider silently if needed (without changing state)
-                        if self.current_api.is_none()
-                            || self.current_api.as_ref().unwrap().provider_hash
-                                != crate::XTreamAPI::new_with_id(
+                        // Only show advanced menu for live streams
+                        if favourite.stream_type == "live" {
+                            // Connect to provider if needed
+                            if self.current_api.is_none()
+                                || self.current_api.as_ref().unwrap().provider_hash
+                                    != crate::XTreamAPI::new_with_id(
+                                        provider.url.clone(),
+                                        provider.username.clone(),
+                                        provider.password.clone(),
+                                        provider.name.clone(),
+                                        provider.id.clone(),
+                                    )
+                                    .unwrap()
+                                    .provider_hash
+                            {
+                                match crate::XTreamAPI::new_with_id(
                                     provider.url.clone(),
                                     provider.username.clone(),
                                     provider.password.clone(),
                                     provider.name.clone(),
                                     provider.id.clone(),
-                                )
-                                .unwrap()
-                                .provider_hash
-                        {
-                            self.add_log(format!(
-                                "Connecting to provider: {}",
-                                provider.name.as_ref().unwrap_or(&provider.url)
-                            ));
-
-                            match crate::XTreamAPI::new_with_id(
-                                provider.url.clone(),
-                                provider.username.clone(),
-                                provider.password.clone(),
-                                provider.name.clone(),
-                                provider.id.clone(),
-                            ) {
-                                Ok(mut api) => {
-                                    api.disable_progress();
-                                    self.current_api = Some(api);
-                                    self.add_log("Successfully connected to provider".to_string());
-                                }
-                                Err(e) => {
-                                    self.state =
-                                        AppState::Error(format!("Failed to connect: {}", e));
-                                    self.add_log(format!("Connection failed: {}", e));
-                                    return None;
+                                ) {
+                                    Ok(mut api) => {
+                                        api.disable_progress();
+                                        self.current_api = Some(api);
+                                        self.current_provider_name = provider.name.clone();
+                                    }
+                                    Err(e) => {
+                                        self.add_log(format!(
+                                            "Failed to connect to provider: {}",
+                                            e
+                                        ));
+                                        return None;
+                                    }
                                 }
                             }
+
+                            // Convert favourite to Stream
+                            let stream = Stream {
+                                num: 0,
+                                name: favourite.name.clone(),
+                                stream_type: favourite.stream_type.clone(),
+                                stream_id: favourite.stream_id,
+                                stream_icon: None,
+                                epg_channel_id: None,
+                                added: None,
+                                category_id: favourite.category_id,
+                                category_ids: None,
+                                custom_sid: None,
+                                tv_archive: None,
+                                direct_source: None,
+                                tv_archive_duration: None,
+                                is_adult: None,
+                                rating: None,
+                                rating_5based: None,
+                                container_extension: Some("m3u8".to_string()),
+                            };
+
+                            self.show_stream_advanced_menu(stream, ContentType::Live)
+                                .await;
                         }
-
-                        // Play the favourite in detached window
-                        self.play_favourite_detached(&favourite).await;
-                    }
-                }
-                KeyCode::Char('t') => {
-                    // Play cross-provider favourite in terminal for debugging
-                    if self.selected_index < self.cross_provider_favourites.len() {
-                        let (favourite, provider) =
-                            self.cross_provider_favourites[self.selected_index].clone();
-
-                        // Connect to provider silently if needed (without changing state)
-                        if self.current_api.is_none()
-                            || self.current_api.as_ref().unwrap().provider_hash
-                                != crate::XTreamAPI::new_with_id(
-                                    provider.url.clone(),
-                                    provider.username.clone(),
-                                    provider.password.clone(),
-                                    provider.name.clone(),
-                                    provider.id.clone(),
-                                )
-                                .unwrap()
-                                .provider_hash
-                        {
-                            self.add_log(format!(
-                                "Connecting to provider: {}",
-                                provider.name.as_ref().unwrap_or(&provider.url)
-                            ));
-
-                            match crate::XTreamAPI::new_with_id(
-                                provider.url.clone(),
-                                provider.username.clone(),
-                                provider.password.clone(),
-                                provider.name.clone(),
-                                provider.id.clone(),
-                            ) {
-                                Ok(mut api) => {
-                                    api.disable_progress();
-                                    self.current_api = Some(api);
-                                    self.add_log("Successfully connected to provider".to_string());
-                                }
-                                Err(e) => {
-                                    self.state =
-                                        AppState::Error(format!("Failed to connect: {}", e));
-                                    self.add_log(format!("Connection failed: {}", e));
-                                    return None;
-                                }
-                            }
-                        }
-
-                        // Play the favourite in terminal for debugging
-                        self.play_favourite_in_terminal(&favourite).await;
                     }
                 }
                 KeyCode::Char('f') => {
@@ -1425,6 +1383,19 @@ impl App {
             AppState::Playing(_name) => match key.code {
                 KeyCode::Esc | KeyCode::Char('s') => {
                     self.stop_playing();
+                }
+                _ => {}
+            },
+            AppState::StreamAdvancedMenu(stream, content_type) => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
+                KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                KeyCode::Enter => {
+                    self.handle_stream_advanced_menu_selection(stream, content_type)
+                        .await;
+                }
+                KeyCode::Esc | KeyCode::Char('b') => {
+                    // Go back to stream selection
+                    self.restore_previous_state();
                 }
                 _ => {}
             },
@@ -2276,6 +2247,175 @@ impl App {
                 self.add_log("MPV launched in terminal with verbose output".to_string());
                 self.add_log("Check the terminal window for debug information".to_string());
             }
+        }
+    }
+
+    async fn show_stream_advanced_menu(&mut self, stream: Stream, content_type: ContentType) {
+        // Save current state AND items for going back
+        self.save_current_navigation_state();
+        self.previous_state_before_menu = Some(Box::new(self.state.clone()));
+        self.previous_items_before_menu = self.items.clone();
+        self.previous_nav_before_menu = NavigationState {
+            selected_index: self.selected_index,
+            scroll_offset: self.scroll_offset,
+            search_query: self.search_query.clone(),
+            filtered_indices: self.filtered_indices.clone(),
+        };
+
+        // Create menu items
+        self.items = vec![
+            "Play stream (default .m3u8)".to_string(),
+            "Play stream in terminal (.m3u8)".to_string(),
+            "Play .ts stream".to_string(),
+            "Play .ts stream in terminal".to_string(),
+            "Play stream in detached window (.m3u8)".to_string(),
+            "Play .ts stream in detached window".to_string(),
+            "Back".to_string(),
+        ];
+
+        self.selected_index = 0;
+        self.filtered_indices = (0..self.items.len()).collect();
+        self.search_query.clear();
+        self.state = AppState::StreamAdvancedMenu(stream, content_type);
+        self.add_log("Advanced menu opened".to_string());
+    }
+
+    async fn handle_stream_advanced_menu_selection(
+        &mut self,
+        stream: Stream,
+        _content_type: ContentType,
+    ) {
+        match self.selected_index {
+            0 => {
+                // Play stream (default .m3u8) - stay in menu
+                self.play_stream(&stream).await;
+            }
+            1 => {
+                // Play stream in terminal (.m3u8) - stay in menu
+                self.play_stream_in_terminal(&stream).await;
+            }
+            2 => {
+                // Play .ts stream - stay in menu
+                self.play_stream_ts(&stream).await;
+            }
+            3 => {
+                // Play .ts stream in terminal - stay in menu
+                self.play_stream_ts_terminal(&stream).await;
+            }
+            4 => {
+                // Play stream in detached window (.m3u8) - stay in menu
+                self.play_stream_detached(&stream).await;
+            }
+            5 => {
+                // Play .ts stream in detached window - stay in menu
+                self.play_stream_ts_detached(&stream).await;
+            }
+            6 => {
+                // Back - exit menu
+                self.restore_previous_state();
+            }
+            _ => {}
+        }
+    }
+
+    async fn play_stream_ts(&mut self, stream: &Stream) {
+        // Store the current state to return to after starting playback
+        let return_state = self.state.clone();
+
+        self.add_log(format!("Playing .ts stream: {}", stream.name));
+
+        if let Some(api) = &self.current_api {
+            let url = api.get_stream_url(
+                stream.stream_id,
+                &stream.stream_type,
+                Some("ts"), // Use .ts extension
+            );
+
+            self.add_log(format!("URL (.ts): {}", url));
+
+            // Run MPV in TUI-compatible mode (background)
+            if let Err(e) = self.player.play_tui(&url).await {
+                self.state = AppState::Error(format!("Failed to play stream: {}", e));
+                self.add_log(format!("Failed to play stream: {}", e));
+            } else {
+                self.add_log(format!("Started playing .ts stream: {}", stream.name));
+                self.add_log("Player started in background window".to_string());
+                // Return to the previous state so user stays in menu
+                self.state = return_state;
+            }
+        }
+    }
+
+    async fn play_stream_ts_terminal(&mut self, stream: &Stream) {
+        self.add_log(format!("Playing .ts stream in terminal: {}", stream.name));
+
+        if let Some(api) = &self.current_api {
+            let url = api.get_stream_url(
+                stream.stream_id,
+                &stream.stream_type,
+                Some("ts"), // Use .ts extension
+            );
+
+            self.add_log(format!("URL (.ts): {}", url));
+
+            // Use terminal play method for debugging
+            if let Err(e) = self.player.play_in_terminal(&url).await {
+                self.state = AppState::Error(format!("Failed to launch terminal: {}", e));
+                self.add_log(format!("Terminal launch failed: {}", e));
+            } else {
+                self.add_log("MPV launched in terminal with verbose output".to_string());
+                self.add_log("Check the terminal window for debug information".to_string());
+            }
+        }
+    }
+
+    async fn play_stream_ts_detached(&mut self, stream: &Stream) {
+        self.add_log(format!(
+            "Playing .ts stream in detached window: {}",
+            stream.name
+        ));
+
+        if let Some(api) = &self.current_api {
+            let url = api.get_stream_url(
+                stream.stream_id,
+                &stream.stream_type,
+                Some("ts"), // Use .ts extension
+            );
+
+            self.add_log(format!("URL (.ts): {}", url));
+
+            // Use detached play method
+            match self.player.play_detached(&url).await {
+                Ok(_) => {
+                    self.add_log(format!("Detached player started for: {}", stream.name));
+                    self.add_log("Player running in separate window".to_string());
+                }
+                Err(e) => {
+                    self.state = AppState::Error(format!("Failed to play stream: {}", e));
+                    self.add_log(format!("Failed to play stream: {}", e));
+                }
+            }
+        }
+    }
+
+    fn restore_previous_state(&mut self) {
+        // Restore to the previous state before the advanced menu
+        if let Some(previous_state) = self.previous_state_before_menu.take() {
+            // Restore the state
+            self.state = *previous_state;
+
+            // Restore the items list
+            self.items = self.previous_items_before_menu.clone();
+
+            // Restore the navigation state (selected index, scroll, filter)
+            self.selected_index = self.previous_nav_before_menu.selected_index;
+            self.scroll_offset = self.previous_nav_before_menu.scroll_offset;
+            self.search_query = self.previous_nav_before_menu.search_query.clone();
+            self.filtered_indices = self.previous_nav_before_menu.filtered_indices.clone();
+
+            // Clear the saved state
+            self.previous_items_before_menu.clear();
+            self.previous_nav_before_menu = NavigationState::new();
         }
     }
 
