@@ -2151,6 +2151,9 @@ impl App {
                 );
                 self.add_log(format!("Removed {} from favourites", stream.name));
 
+                // Clear cross-provider favourites cache to force reload
+                self.cross_provider_favourites.clear();
+
                 // Update the display to show the star is removed
                 if let Some(item) = self.items.get_mut(self.selected_index)
                     && item.starts_with("[FAV] ")
@@ -2172,6 +2175,9 @@ impl App {
                     .favourites_manager
                     .add_favourite(&api.provider_hash, favourite);
                 self.add_log(format!("Added {} to favourites", stream.name));
+
+                // Clear cross-provider favourites cache to force reload
+                self.cross_provider_favourites.clear();
 
                 // Update the display to show the star
                 if let Some(item) = self.items.get_mut(self.selected_index)
