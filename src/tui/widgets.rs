@@ -28,8 +28,8 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-pub fn create_help_widget() -> Paragraph<'static> {
-    let help_text = vec![
+pub fn get_help_lines() -> Vec<Line<'static>> {
+    vec![
         Line::from(""),
         Line::from(vec![Span::styled(
             "IPTV Player TUI - Help",
@@ -90,15 +90,64 @@ pub fn create_help_widget() -> Paragraph<'static> {
         Line::from("  • Cache management for faster loading"),
         Line::from("  • Multi-provider support"),
         Line::from(""),
-        Line::from("Press any key to close this help"),
-    ];
+        Line::from(vec![Span::styled(
+            "Help Navigation:",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from("  ↑/↓       - Scroll help text"),
+        Line::from("  PgUp/PgDn - Scroll by page"),
+        Line::from("  Esc/?/F1  - Close help"),
+        Line::from(""),
+        Line::from("Press Esc, ? or F1 to close this help"),
+    ]
+}
 
-    Paragraph::new(help_text)
+pub fn create_help_widget() -> Paragraph<'static> {
+    Paragraph::new(get_help_lines())
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Blue))
                 .title(" Help "),
+        )
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: false })
+}
+
+pub fn create_scrollable_help_widget(
+    scroll_offset: usize,
+    visible_height: usize,
+) -> Paragraph<'static> {
+    let all_lines = get_help_lines();
+    let total_lines = all_lines.len();
+
+    // Calculate the effective scroll offset
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    let scroll = scroll_offset.min(max_scroll);
+
+    // Get the visible lines
+    let end_idx = (scroll + visible_height).min(total_lines);
+    let visible_lines: Vec<Line> = all_lines
+        .into_iter()
+        .skip(scroll)
+        .take(end_idx - scroll)
+        .collect();
+
+    // Create title with scroll indicator if needed
+    let title = if max_scroll > 0 {
+        format!(" Help (↑↓ to scroll, {}/{}) ", scroll + 1, max_scroll + 1)
+    } else {
+        " Help ".to_string()
+    };
+
+    Paragraph::new(visible_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue))
+                .title(title),
         )
         .alignment(Alignment::Left)
         .wrap(Wrap { trim: false })

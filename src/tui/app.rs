@@ -105,6 +105,7 @@ pub struct App {
     pub progress: Option<(f64, String)>,
     pub logs: Vec<(DateTime<Local>, String)>,
     pub show_help: bool,
+    pub help_scroll_offset: usize,
     pub log_display_mode: LogDisplayMode,
     pub log_selected_index: usize,
     pub log_scroll_offset: usize,
@@ -178,6 +179,7 @@ impl App {
             progress: None,
             logs: Vec::new(),
             show_help: false,
+            help_scroll_offset: 0,
             log_display_mode: LogDisplayMode::Side,
             log_selected_index: 0,
             log_scroll_offset: 0,
@@ -353,13 +355,40 @@ impl App {
             return None;
         }
 
-        // If help is shown, any key closes it (except for the help toggle keys)
+        // If help is shown, handle help-specific navigation
         if self.show_help {
-            if key.code == KeyCode::Char('?') || key.code == KeyCode::F(1) {
-                self.show_help = false;
-            } else {
-                // Any other key just closes the help
-                self.show_help = false;
+            match key.code {
+                KeyCode::Char('?') | KeyCode::F(1) | KeyCode::Esc => {
+                    self.show_help = false;
+                    self.help_scroll_offset = 0; // Reset scroll when closing
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.help_scroll_offset > 0 {
+                        self.help_scroll_offset -= 1;
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    // We'll need to pass the total lines from the widget
+                    self.help_scroll_offset += 1;
+                }
+                KeyCode::PageUp => {
+                    self.help_scroll_offset = self.help_scroll_offset.saturating_sub(10);
+                }
+                KeyCode::PageDown => {
+                    self.help_scroll_offset += 10;
+                }
+                KeyCode::Home => {
+                    self.help_scroll_offset = 0;
+                }
+                KeyCode::End => {
+                    // Set to a high value, will be clamped in rendering
+                    self.help_scroll_offset = 1000;
+                }
+                _ => {
+                    // Any other key closes the help
+                    self.show_help = false;
+                    self.help_scroll_offset = 0;
+                }
             }
             return None;
         }
@@ -370,6 +399,7 @@ impl App {
 
         if key.code == KeyCode::Char('?') || key.code == KeyCode::F(1) {
             self.show_help = true;
+            self.help_scroll_offset = 0; // Reset scroll when opening
             return None;
         }
 

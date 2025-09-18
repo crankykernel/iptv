@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 use super::app::{App, AppState, LogDisplayMode};
-use super::widgets::{centered_rect, create_help_widget};
+use super::widgets::{centered_rect, create_scrollable_help_widget};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let size = frame.area();
@@ -39,7 +39,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Draw help overlay if active
     if app.show_help {
-        draw_help_overlay(frame, size);
+        draw_help_overlay(frame, app, size);
     }
 
     // Draw error overlays (loading overlay removed)
@@ -418,10 +418,16 @@ fn draw_scrollbar(frame: &mut Frame, area: Rect, offset: usize, total: usize, vi
     frame.render_widget(scrollbar, scrollbar_area);
 }
 
-fn draw_help_overlay(frame: &mut Frame, area: Rect) {
+fn draw_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
     let help_area = centered_rect(60, 80, area);
     frame.render_widget(Clear, help_area);
-    frame.render_widget(create_help_widget(), help_area);
+
+    // Calculate visible height for the help text (accounting for borders)
+    let visible_height = help_area.height.saturating_sub(2) as usize;
+
+    // Create scrollable help widget
+    let help_widget = create_scrollable_help_widget(app.help_scroll_offset, visible_height);
+    frame.render_widget(help_widget, help_area);
 }
 
 fn draw_error_overlay(frame: &mut Frame, area: Rect, message: &str) {
