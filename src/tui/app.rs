@@ -76,7 +76,6 @@ pub enum AppState {
     VodInfo(VodInfoState),
     SeasonSelection(Stream),
     EpisodeSelection(Stream, TuiSeason),
-    FavouriteSelection,
     CrossProviderFavourites,
     Loading(String),
     Error(String),
@@ -116,7 +115,6 @@ pub struct App {
     streams: Vec<Stream>,
     seasons: Vec<TuiSeason>,
     episodes: Vec<ApiEpisode>,
-    favourites: Vec<FavouriteStream>,
     cross_provider_favourites: Vec<(FavouriteStream, ProviderConfig)>,
     vod_info: Option<VodInfoResponse>,
     // Cache for categories by content type
@@ -129,7 +127,6 @@ pub struct App {
     category_selection_states: HashMap<ContentType, NavigationState>,
     stream_selection_states: HashMap<(ContentType, String), NavigationState>,
     season_selection_state: NavigationState,
-    favourite_selection_state: NavigationState,
     cross_provider_favourites_state: NavigationState,
     ignore_config: IgnoreConfig,
 }
@@ -188,7 +185,6 @@ impl App {
             streams: Vec::new(),
             seasons: Vec::new(),
             episodes: Vec::new(),
-            favourites: Vec::new(),
             cross_provider_favourites: Vec::new(),
             vod_info: None,
             cached_categories: HashMap::new(),
@@ -198,7 +194,6 @@ impl App {
             category_selection_states: HashMap::new(),
             stream_selection_states: HashMap::new(),
             season_selection_state: NavigationState::new(),
-            favourite_selection_state: NavigationState::new(),
             cross_provider_favourites_state: NavigationState::new(),
             ignore_config: IgnoreConfig::load().unwrap_or_default(),
         }
@@ -1396,59 +1391,21 @@ impl App {
                         self.reset_filter();
                     } else {
                         self.save_current_navigation_state();
-                        self.state = AppState::ProviderSelection;
-                        self.restore_navigation_state(&AppState::ProviderSelection);
-                        self.update_provider_items();
+                        // Go back to MainMenu for single provider, ProviderSelection for multiple
+                        if self.providers.len() == 1 {
+                            self.state = AppState::MainMenu;
+                            self.restore_navigation_state(&AppState::MainMenu);
+                            self.update_main_menu_items();
+                        } else {
+                            self.state = AppState::ProviderSelection;
+                            self.restore_navigation_state(&AppState::ProviderSelection);
+                            self.update_provider_items();
+                        }
                     }
                 }
                 KeyCode::Char('/') => {
                     self.search_active = true;
                     self.search_query.clear();
-                }
-                _ => {}
-            },
-            AppState::FavouriteSelection => match key.code {
-                KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
-                KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
-                KeyCode::PageUp => self.move_selection_page_up(),
-                KeyCode::PageDown => self.move_selection_page_down(),
-                KeyCode::Home => self.move_selection_home(),
-                KeyCode::End => self.move_selection_end(),
-                KeyCode::Char('f') => {
-                    if self.selected_index < self.favourites.len() {
-                        self.remove_favourite(self.selected_index).await;
-                    }
-                }
-                KeyCode::Enter => {
-                    if self.selected_index < self.favourites.len() {
-                        let fav = self.favourites[self.selected_index].clone();
-                        self.play_favourite(&fav).await;
-                    }
-                }
-                KeyCode::Char('d') => {
-                    // Play favourite in detached window
-                    if self.selected_index < self.favourites.len() {
-                        let fav = self.favourites[self.selected_index].clone();
-                        self.play_favourite_detached(&fav).await;
-                    }
-                }
-                KeyCode::Char('t') => {
-                    // Play favourite in terminal for debugging
-                    if self.selected_index < self.favourites.len() {
-                        let fav = self.favourites[self.selected_index].clone();
-                        self.play_favourite_in_terminal(&fav).await;
-                    }
-                }
-                KeyCode::Esc | KeyCode::Char('b') => {
-                    // If there's an active filter, clear it instead of going back
-                    if !self.search_query.is_empty() {
-                        self.reset_filter();
-                    } else {
-                        self.save_current_navigation_state();
-                        self.state = AppState::MainMenu;
-                        self.restore_navigation_state(&AppState::MainMenu);
-                        self.update_main_menu_items();
-                    }
                 }
                 _ => {}
             },
@@ -1579,7 +1536,6 @@ impl App {
                 self.category_selection_states.clear();
                 self.stream_selection_states.clear();
                 self.season_selection_state = NavigationState::new();
-                self.favourite_selection_state = NavigationState::new();
 
                 self.state = AppState::MainMenu;
                 self.restore_navigation_state(&AppState::MainMenu);
@@ -1605,20 +1561,39 @@ impl App {
     }
 
     fn update_main_menu_items(&mut self) {
-        self.items = vec![
-            "Favourites".to_string(),
+        let mut menu_items = vec![];
+
+        // Only show Favourites in main menu when there's a single provider
+        if self.providers.len() == 1 {
+            menu_items.push("All Favourites".to_string());
+        }
+
+        menu_items.extend(vec![
             "Live TV".to_string(),
             "Movies (VOD)".to_string(),
             "TV Series".to_string(),
             "Refresh Cache".to_string(),
-        ];
+        ]);
+
+        self.items = menu_items;
         self.reset_filter();
     }
 
     async fn handle_main_menu_selection(&mut self) -> Option<Action> {
-        match self.selected_index {
-            0 => {
-                self.load_favourites().await;
+        let has_single_provider = self.providers.len() == 1;
+
+        // Adjust index based on whether Favourites is shown
+        let adjusted_index = if has_single_provider {
+            self.selected_index
+        } else {
+            // No Favourites option, so all indices shift down by 1
+            self.selected_index + 1
+        };
+
+        match adjusted_index {
+            0 if has_single_provider => {
+                // Load all favourites for single provider
+                self.load_all_favourites().await;
                 None
             }
             1 => {
@@ -2143,33 +2118,6 @@ impl App {
         self.add_log(format!("Loaded {} favourites", self.items.len()));
     }
 
-    async fn load_favourites(&mut self) {
-        self.state = AppState::Loading("Loading favourites...".to_string());
-        self.add_log("Loading favourites".to_string());
-
-        if let Some(api) = &mut self.current_api {
-            match api.favourites_manager.get_favourites(&api.provider_hash) {
-                Ok(favs) => {
-                    self.favourites = favs;
-                    self.items = self
-                        .favourites
-                        .iter()
-                        .map(|f| format!("[{}] {}", f.stream_type, f.name))
-                        .collect();
-                    self.reset_filter();
-
-                    self.state = AppState::FavouriteSelection;
-                    self.restore_navigation_state(&AppState::FavouriteSelection);
-                    self.add_log(format!("Loaded {} favourites", self.favourites.len()));
-                }
-                Err(e) => {
-                    self.state = AppState::Error(format!("Failed to load favourites: {}", e));
-                    self.add_log(format!("Failed to load favourites: {}", e));
-                }
-            }
-        }
-    }
-
     async fn toggle_favourite_stream(&mut self, stream: &Stream) {
         if let Some(api) = &self.current_api {
             // Check if this stream is already a favourite
@@ -2216,36 +2164,6 @@ impl App {
                 {
                     *item = format!("[FAV] {}", item);
                 }
-            }
-        }
-    }
-
-    async fn remove_favourite(&mut self, index: usize) {
-        if index < self.favourites.len()
-            && let Some(api) = &self.current_api
-        {
-            let fav = &self.favourites[index];
-            let _ = api.favourites_manager.remove_favourite(
-                &api.provider_hash,
-                fav.stream_id,
-                &fav.stream_type,
-            );
-            self.add_log(format!("Removed {} from favourites", fav.name));
-
-            self.favourites.remove(index);
-            self.items.remove(index);
-
-            // Update filtered_indices after removing item
-            self.filtered_indices = (0..self.items.len()).collect();
-
-            // Adjust selected index if needed
-            if self.selected_index >= self.items.len() && self.selected_index > 0 {
-                self.selected_index -= 1;
-            }
-
-            // Ensure scroll offset is valid
-            if self.scroll_offset > 0 && self.scroll_offset >= self.items.len() {
-                self.scroll_offset = self.items.len().saturating_sub(1);
             }
         }
     }
@@ -2389,32 +2307,6 @@ impl App {
             } else {
                 self.add_log("Episode started in new independent window".to_string());
                 self.add_log("This window won't be affected by other playback".to_string());
-            }
-        }
-    }
-
-    async fn play_favourite(&mut self, fav: &FavouriteStream) {
-        // Store the current state to return to after starting playback
-        let return_state = self.state.clone();
-
-        self.add_log(format!("Playing favourite: {}", fav.name));
-
-        if let Some(api) = &self.current_api {
-            // Construct the stream URL from the favourite stream ID
-            let url = api.get_stream_url(fav.stream_id, &fav.stream_type, None);
-
-            // Log the stream URL to the logs panel
-            self.add_log(format!("Stream URL: {}", url));
-
-            // Use TUI-specific play method that runs in background
-            if let Err(e) = self.player.play_tui(&url).await {
-                self.state = AppState::Error(format!("Failed to play favourite: {}", e));
-                self.add_log(format!("Playback failed: {}", e));
-            } else {
-                self.add_log("Player started in background window".to_string());
-                self.add_log("Continue browsing while video plays".to_string());
-                // Return to the previous state so user can continue browsing
-                self.state = return_state;
             }
         }
     }
@@ -2732,9 +2624,6 @@ impl App {
             AppState::SeasonSelection(_) => {
                 self.season_selection_state = nav_state;
             }
-            AppState::FavouriteSelection => {
-                self.favourite_selection_state = nav_state;
-            }
             AppState::CrossProviderFavourites => {
                 self.cross_provider_favourites_state = nav_state;
             }
@@ -2757,7 +2646,6 @@ impl App {
                 .cloned()
                 .unwrap_or_else(NavigationState::new),
             AppState::SeasonSelection(_) => self.season_selection_state.clone(),
-            AppState::FavouriteSelection => self.favourite_selection_state.clone(),
             AppState::CrossProviderFavourites => self.cross_provider_favourites_state.clone(),
             _ => NavigationState::new(),
         };
