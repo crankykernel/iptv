@@ -6,9 +6,32 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum PlayMode {
+    Mpv,           // Default MPV mode (background with RPC)
+    MpvInTerminal, // MPV in terminal mode (visible output)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settings {
+    pub play_mode: PlayMode,
+    pub use_ts_for_live: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            play_mode: PlayMode::Mpv,
+            use_ts_for_live: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub providers: Vec<ProviderConfig>,
+    #[serde(default)]
+    pub settings: Settings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +53,7 @@ impl Default for Config {
                 username: "your-username".to_string(),
                 password: "your-password".to_string(),
             }],
+            settings: Settings::default(),
         }
     }
 }

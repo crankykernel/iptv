@@ -53,6 +53,17 @@ pub struct VodInfoState {
     pub content_scroll: usize, // scroll position for content display
 }
 
+use crate::config::PlayMode;
+
+impl std::fmt::Display for PlayMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlayMode::Mpv => write!(f, "MPV"),
+            PlayMode::MpvInTerminal => write!(f, "MPV in Terminal"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct NavigationState {
     pub selected_index: usize,
@@ -78,6 +89,7 @@ pub enum AppState {
     EpisodeSelection(Stream, TuiSeason),
     CrossProviderFavourites,
     StreamAdvancedMenu(Stream, ContentType),
+    Configuration,
     Loading(String),
     Error(String),
     Playing(String),
@@ -94,7 +106,7 @@ pub enum Action {
 
 pub struct App {
     pub state: AppState,
-    pub providers: Vec<ProviderConfig>,
+    pub config: crate::config::Config,
     pub current_api: Option<XTreamAPI>,
     pub current_provider_name: Option<String>,
     pub player: Player,
@@ -113,6 +125,7 @@ pub struct App {
     pub search_query: String,
     pub search_active: bool,
     pub filtered_indices: Vec<usize>,
+    pub config_state: NavigationState,
     categories: Vec<Category>,
     streams: Vec<Stream>,
     seasons: Vec<TuiSeason>,
@@ -143,7 +156,8 @@ impl App {
         self.visible_height = height.saturating_sub(4).max(1);
     }
 
-    pub fn new(providers: Vec<ProviderConfig>, player: Player) -> Self {
+    pub fn new(config: crate::config::Config, player: Player) -> Self {
+        let providers = config.providers.clone();
         let items = if providers.len() > 1 {
             let mut items = vec!["Favourites".to_string()];
             items.extend(
@@ -168,7 +182,7 @@ impl App {
 
         Self {
             state,
-            providers,
+            config,
             current_api: None,
             current_provider_name: None,
             player,
@@ -187,6 +201,7 @@ impl App {
             search_query: String::new(),
             search_active: false,
             filtered_indices,
+            config_state: NavigationState::new(),
             categories: Vec::new(),
             streams: Vec::new(),
             seasons: Vec::new(),
@@ -216,10 +231,10 @@ impl App {
     pub async fn async_tick(&mut self) {
         // Auto-connect to single provider on startup
         if matches!(self.state, AppState::Loading(_))
-            && self.providers.len() == 1
+            && self.config.providers.len() == 1
             && self.current_api.is_none()
         {
-            let provider = self.providers[0].clone();
+            let provider = self.config.providers[0].clone();
             self.connect_to_provider(&provider).await;
         }
 
@@ -429,8 +444,8 @@ impl App {
                         // Favourites selected
                         self.save_current_navigation_state();
                         self.load_all_favourites().await;
-                    } else if self.selected_index - 1 < self.providers.len() {
-                        let provider = self.providers[self.selected_index - 1].clone();
+                    } else if self.selected_index - 1 < self.config.providers.len() {
+                        let provider = self.config.providers[self.selected_index - 1].clone();
                         self.save_current_navigation_state();
                         self.connect_to_provider(&provider).await;
                     }
@@ -452,7 +467,7 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
-                    if self.providers.len() > 1 {
+                    if self.config.providers.len() > 1 {
                         self.save_current_navigation_state();
                         self.state = AppState::ProviderSelection;
                         self.restore_navigation_state(&AppState::ProviderSelection);
@@ -1252,10 +1267,19 @@ impl App {
 
                         // Play the favourite using TUI-specific method
                         if let Some(api) = &self.current_api {
+                            // Use .ts extension if configured for live streams
+                            let extension = if favourite.stream_type == "live"
+                                && self.config.settings.use_ts_for_live
+                            {
+                                Some("ts")
+                            } else {
+                                None
+                            };
+
                             let stream_url = api.get_stream_url(
                                 favourite.stream_id,
                                 &favourite.stream_type,
-                                None,
+                                extension,
                             );
 
                             self.add_log(format!("Playing: {}", favourite.name));
@@ -1263,14 +1287,32 @@ impl App {
                             // Log the stream URL to the logs panel
                             self.add_log(format!("Stream URL: {}", stream_url));
 
-                            // Use TUI-specific play method that runs in background
-                            if let Err(e) = self.player.play_tui(&stream_url).await {
+                            // Use play mode from configuration
+                            let result = match self.config.settings.play_mode {
+                                PlayMode::Mpv => self.player.play_tui(&stream_url).await,
+                                PlayMode::MpvInTerminal => {
+                                    self.player.play_in_terminal(&stream_url).await
+                                }
+                            };
+
+                            if let Err(e) = result {
                                 self.state =
                                     AppState::Error(format!("Failed to play favourite: {}", e));
                                 self.add_log(format!("Playback failed: {}", e));
                             } else {
-                                self.add_log("Player started in background window".to_string());
-                                self.add_log("Continue browsing while video plays".to_string());
+                                match self.config.settings.play_mode {
+                                    PlayMode::Mpv => {
+                                        self.add_log(
+                                            "Player started in background window".to_string(),
+                                        );
+                                        self.add_log(
+                                            "Continue browsing while video plays".to_string(),
+                                        );
+                                    }
+                                    PlayMode::MpvInTerminal => {
+                                        self.add_log("Player started in terminal mode".to_string());
+                                    }
+                                }
                                 // Stay in CrossProviderFavourites state
                             }
                         }
@@ -1393,7 +1435,7 @@ impl App {
                     } else {
                         self.save_current_navigation_state();
                         // Go back to MainMenu for single provider, ProviderSelection for multiple
-                        if self.providers.len() == 1 {
+                        if self.config.providers.len() == 1 {
                             self.state = AppState::MainMenu;
                             self.restore_navigation_state(&AppState::MainMenu);
                             self.update_main_menu_items();
@@ -1426,6 +1468,21 @@ impl App {
                 KeyCode::Esc | KeyCode::Char('b') => {
                     // Go back to stream selection
                     self.restore_previous_state();
+                }
+                _ => {}
+            },
+            AppState::Configuration => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
+                KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                KeyCode::Enter => {
+                    self.handle_configuration_selection();
+                }
+                KeyCode::Esc | KeyCode::Char('b') => {
+                    // Go back to main menu
+                    self.save_current_navigation_state();
+                    self.state = AppState::MainMenu;
+                    self.restore_navigation_state(&AppState::MainMenu);
+                    self.update_main_menu_items();
                 }
                 _ => {}
             },
@@ -1567,7 +1624,8 @@ impl App {
     fn update_provider_items(&mut self) {
         let mut items = vec!["Favourites".to_string()];
         items.extend(
-            self.providers
+            self.config
+                .providers
                 .iter()
                 .map(|p| p.name.clone().unwrap_or_else(|| p.url.clone())),
         );
@@ -1579,7 +1637,7 @@ impl App {
         let mut menu_items = vec![];
 
         // Only show Favourites in main menu when there's a single provider
-        if self.providers.len() == 1 {
+        if self.config.providers.len() == 1 {
             menu_items.push("Favourites".to_string());
         }
 
@@ -1587,6 +1645,7 @@ impl App {
             "Live TV".to_string(),
             "Movies (VOD)".to_string(),
             "TV Series".to_string(),
+            "Configuration".to_string(),
             "Refresh Cache".to_string(),
         ]);
 
@@ -1595,7 +1654,7 @@ impl App {
     }
 
     async fn handle_main_menu_selection(&mut self) -> Option<Action> {
-        let has_single_provider = self.providers.len() == 1;
+        let has_single_provider = self.config.providers.len() == 1;
 
         // Adjust index based on whether Favourites is shown
         let adjusted_index = if has_single_provider {
@@ -1623,8 +1682,81 @@ impl App {
                 self.load_categories(ContentType::Series).await;
                 None
             }
-            4 => self.refresh_cache().await,
+            4 => {
+                self.show_configuration();
+                None
+            }
+            5 => self.refresh_cache().await,
             _ => None,
+        }
+    }
+
+    fn show_configuration(&mut self) {
+        self.save_current_navigation_state();
+        self.state = AppState::Configuration;
+        self.update_configuration_items();
+        self.restore_navigation_state(&AppState::Configuration);
+    }
+
+    fn update_configuration_items(&mut self) {
+        self.items = vec![
+            format!("Play Mode: {}", self.config.settings.play_mode),
+            format!(
+                "Use .ts URL for live streams: {}",
+                if self.config.settings.use_ts_for_live {
+                    "Enabled"
+                } else {
+                    "Disabled"
+                }
+            ),
+            "Back".to_string(),
+        ];
+        self.reset_filter();
+    }
+
+    fn handle_configuration_selection(&mut self) {
+        match self.selected_index {
+            0 => {
+                // Toggle play mode
+                self.config.settings.play_mode = match self.config.settings.play_mode {
+                    PlayMode::Mpv => PlayMode::MpvInTerminal,
+                    PlayMode::MpvInTerminal => PlayMode::Mpv,
+                };
+                // Save configuration
+                if let Some(path) = crate::config::Config::default_config_path() {
+                    if let Err(e) = self.config.save(&path) {
+                        self.add_log(format!("Failed to save settings: {}", e));
+                    } else {
+                        self.add_log("Settings saved".to_string());
+                    }
+                } else {
+                    self.add_log("Failed to determine config path".to_string());
+                }
+                self.update_configuration_items();
+            }
+            1 => {
+                // Toggle .ts URL preference
+                self.config.settings.use_ts_for_live = !self.config.settings.use_ts_for_live;
+                // Save configuration
+                if let Some(path) = crate::config::Config::default_config_path() {
+                    if let Err(e) = self.config.save(&path) {
+                        self.add_log(format!("Failed to save settings: {}", e));
+                    } else {
+                        self.add_log("Settings saved".to_string());
+                    }
+                } else {
+                    self.add_log("Failed to determine config path".to_string());
+                }
+                self.update_configuration_items();
+            }
+            2 => {
+                // Back
+                self.save_current_navigation_state();
+                self.state = AppState::MainMenu;
+                self.restore_navigation_state(&AppState::MainMenu);
+                self.update_main_menu_items();
+            }
+            _ => {}
         }
     }
 
@@ -2082,7 +2214,7 @@ impl App {
         let mut all_items = Vec::new();
 
         // Collect favourites from all providers
-        let providers = self.providers.clone();
+        let providers = self.config.providers.clone();
         for provider in &providers {
             let api = match crate::XTreamAPI::new_with_id(
                 provider.url.clone(),
@@ -2197,6 +2329,14 @@ impl App {
         self.add_log(format!("Playing: {}", stream.name));
 
         if let Some(api) = &self.current_api {
+            // Use .ts extension if configured for live streams
+            let extension = if stream.stream_type == "live" && self.config.settings.use_ts_for_live
+            {
+                Some("ts")
+            } else {
+                stream.container_extension.as_deref()
+            };
+
             let url = api.get_stream_url(
                 stream.stream_id,
                 if stream.stream_type == "live" {
@@ -2204,19 +2344,31 @@ impl App {
                 } else {
                     "movie"
                 },
-                stream.container_extension.as_deref(),
+                extension,
             );
 
             // Log the stream URL to the logs panel
             self.add_log(format!("Stream URL: {}", url));
 
-            // Use TUI-specific play method that runs in background
-            if let Err(e) = self.player.play_tui(&url).await {
+            // Use play mode from configuration
+            let result = match self.config.settings.play_mode {
+                PlayMode::Mpv => self.player.play_tui(&url).await,
+                PlayMode::MpvInTerminal => self.player.play_in_terminal(&url).await,
+            };
+
+            if let Err(e) = result {
                 self.state = AppState::Error(format!("Failed to play stream: {}", e));
                 self.add_log(format!("Playback failed: {}", e));
             } else {
-                self.add_log("Player started in background window".to_string());
-                self.add_log("Continue browsing while video plays".to_string());
+                match self.config.settings.play_mode {
+                    PlayMode::Mpv => {
+                        self.add_log("Player started in background window".to_string());
+                        self.add_log("Continue browsing while video plays".to_string());
+                    }
+                    PlayMode::MpvInTerminal => {
+                        self.add_log("Player started in terminal mode".to_string());
+                    }
+                }
                 // Return to the previous state so user can continue browsing
                 self.state = return_state;
             }
@@ -2465,13 +2617,25 @@ impl App {
             // Log the stream URL to the logs panel
             self.add_log(format!("Stream URL: {}", url));
 
-            // Use TUI-specific play method that runs in background
-            if let Err(e) = self.player.play_tui(&url).await {
+            // Use play mode from configuration
+            let result = match self.config.settings.play_mode {
+                PlayMode::Mpv => self.player.play_tui(&url).await,
+                PlayMode::MpvInTerminal => self.player.play_in_terminal(&url).await,
+            };
+
+            if let Err(e) = result {
                 self.state = AppState::Error(format!("Failed to play episode: {}", e));
                 self.add_log(format!("Playback failed: {}", e));
             } else {
-                self.add_log("Player started in background window".to_string());
-                self.add_log("Continue browsing while video plays".to_string());
+                match self.config.settings.play_mode {
+                    PlayMode::Mpv => {
+                        self.add_log("Player started in background window".to_string());
+                        self.add_log("Continue browsing while video plays".to_string());
+                    }
+                    PlayMode::MpvInTerminal => {
+                        self.add_log("Player started in terminal mode".to_string());
+                    }
+                }
                 // Return to the previous state so user can continue browsing
                 self.state = return_state;
             }
@@ -2680,13 +2844,25 @@ impl App {
             // Log the stream URL
             self.add_log(format!("Stream URL: {}", url));
 
-            // Use TUI-specific play method that runs in background
-            if let Err(e) = self.player.play_tui(&url).await {
+            // Use play mode from configuration
+            let result = match self.config.settings.play_mode {
+                PlayMode::Mpv => self.player.play_tui(&url).await,
+                PlayMode::MpvInTerminal => self.player.play_in_terminal(&url).await,
+            };
+
+            if let Err(e) = result {
                 self.state = AppState::Error(format!("Failed to play movie: {}", e));
                 self.add_log(format!("Playback failed: {}", e));
             } else {
-                self.add_log("Player started in background window".to_string());
-                self.add_log("Continue browsing while video plays".to_string());
+                match self.config.settings.play_mode {
+                    PlayMode::Mpv => {
+                        self.add_log("Player started in background window".to_string());
+                        self.add_log("Continue browsing while video plays".to_string());
+                    }
+                    PlayMode::MpvInTerminal => {
+                        self.add_log("Player started in terminal mode".to_string());
+                    }
+                }
                 // Return to the VOD info state so user can see the info
                 self.state = return_state;
             }
@@ -2748,6 +2924,9 @@ impl App {
             AppState::CrossProviderFavourites => {
                 self.cross_provider_favourites_state = nav_state;
             }
+            AppState::Configuration => {
+                self.config_state = nav_state;
+            }
             _ => {}
         }
     }
@@ -2768,6 +2947,7 @@ impl App {
                 .unwrap_or_else(NavigationState::new),
             AppState::SeasonSelection(_) => self.season_selection_state.clone(),
             AppState::CrossProviderFavourites => self.cross_provider_favourites_state.clone(),
+            AppState::Configuration => self.config_state.clone(),
             _ => NavigationState::new(),
         };
 

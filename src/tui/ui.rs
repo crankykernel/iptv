@@ -61,6 +61,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
             format!("{} - Season {}", series.name, season.season_number)
         }
         AppState::VodInfo(_) => "VOD Info".to_string(),
+        AppState::Configuration => "Configuration".to_string(),
         AppState::Playing(name) => format!("Playing: {}", name),
         _ => "IPTV Player".to_string(),
     };

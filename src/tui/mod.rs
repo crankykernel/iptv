@@ -14,7 +14,6 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 
-use crate::config::ProviderConfig;
 use crate::player::Player;
 
 pub use app::App;
@@ -57,11 +56,11 @@ impl Tui {
     }
 }
 
-pub async fn run_tui(providers: Vec<ProviderConfig>, player: Player) -> Result<()> {
+pub async fn run_tui(config: crate::config::Config, player: Player) -> Result<()> {
     let mut tui = Tui::new()?;
     tui.init()?;
 
-    let mut app = App::new(providers, player.clone());
+    let mut app = App::new(config, player.clone());
     let res = run_app(&mut tui, &mut app).await;
 
     // Clean up player resources before exiting
