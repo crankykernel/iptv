@@ -189,6 +189,15 @@ fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .map(|&item_idx| {
             let item = &app.items[item_idx];
 
+            // Check if this is a separator (empty string)
+            if item.is_empty() {
+                // Create a separator line
+                let separator = "─".repeat(inner_area.width as usize);
+                return ListItem::new(
+                    Line::from(separator).style(Style::default().fg(Color::DarkGray)),
+                );
+            }
+
             // Check if we're in VOD info mode and determine highlighting behavior
             let should_highlight = match &app.state {
                 AppState::VodInfo(_) => {

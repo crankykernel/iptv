@@ -165,6 +165,9 @@ impl App {
                     .iter()
                     .map(|p| p.name.clone().unwrap_or_else(|| p.url.clone())),
             );
+            // Add separator and Configuration option
+            items.push("".to_string()); // Empty string acts as separator
+            items.push("Configuration".to_string());
             items
         } else {
             vec![]
@@ -440,14 +443,25 @@ impl App {
                 KeyCode::Home | KeyCode::Char('H') => self.move_selection_home(),
                 KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
                 KeyCode::Enter => {
+                    // Skip empty items (separators)
+                    if !self.items.is_empty() && self.items[self.selected_index].is_empty() {
+                        return None;
+                    }
+
                     if self.selected_index == 0 {
                         // Favourites selected
                         self.save_current_navigation_state();
                         self.load_all_favourites().await;
-                    } else if self.selected_index - 1 < self.config.providers.len() {
+                    } else if self.selected_index > 0
+                        && self.selected_index <= self.config.providers.len()
+                    {
+                        // Provider selected
                         let provider = self.config.providers[self.selected_index - 1].clone();
                         self.save_current_navigation_state();
                         self.connect_to_provider(&provider).await;
+                    } else if self.selected_index == self.items.len() - 1 {
+                        // Configuration selected (last item)
+                        self.show_configuration();
                     }
                 }
                 KeyCode::Esc => return Some(Action::Quit),
@@ -1478,11 +1492,31 @@ impl App {
                     self.handle_configuration_selection();
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
-                    // Go back to main menu
+                    // Save configuration state before going back
                     self.save_current_navigation_state();
-                    self.state = AppState::MainMenu;
-                    self.restore_navigation_state(&AppState::MainMenu);
-                    self.update_main_menu_items();
+
+                    // Restore to the previous state before entering configuration
+                    if let Some(previous_state) = self.previous_state_before_menu.take() {
+                        self.state = *previous_state;
+                        self.items = self.previous_items_before_menu.clone();
+                        self.selected_index = self.previous_nav_before_menu.selected_index;
+                        self.scroll_offset = self.previous_nav_before_menu.scroll_offset;
+                        self.search_query = self.previous_nav_before_menu.search_query.clone();
+                        self.filtered_indices =
+                            self.previous_nav_before_menu.filtered_indices.clone();
+
+                        // Update the items based on the state we're returning to
+                        match &self.state {
+                            AppState::ProviderSelection => self.update_provider_items(),
+                            AppState::MainMenu => self.update_main_menu_items(),
+                            _ => {}
+                        }
+                    } else {
+                        // Fallback to main menu if no previous state saved
+                        self.state = AppState::MainMenu;
+                        self.restore_navigation_state(&AppState::MainMenu);
+                        self.update_main_menu_items();
+                    }
                 }
                 _ => {}
             },
@@ -1500,12 +1534,26 @@ impl App {
         }
 
         if let Some(current_pos) = indices.iter().position(|&idx| idx == self.selected_index) {
-            if current_pos > 0 {
-                // Normal upward movement
-                self.selected_index = indices[current_pos - 1];
-            } else {
-                // Wrap to bottom: move to last item
-                self.selected_index = indices[indices.len() - 1];
+            let mut new_pos = current_pos;
+            loop {
+                if new_pos > 0 {
+                    new_pos -= 1;
+                } else {
+                    // Wrap to bottom
+                    new_pos = indices.len() - 1;
+                }
+
+                let new_index = indices[new_pos];
+                // Skip empty items (separators)
+                if new_index < self.items.len() && !self.items[new_index].is_empty() {
+                    self.selected_index = new_index;
+                    break;
+                }
+
+                // Prevent infinite loop if all items are empty
+                if new_pos == current_pos {
+                    break;
+                }
             }
             self.ensure_selected_visible();
         }
@@ -1519,12 +1567,26 @@ impl App {
         }
 
         if let Some(current_pos) = indices.iter().position(|&idx| idx == self.selected_index) {
-            if current_pos < indices.len() - 1 {
-                // Normal downward movement
-                self.selected_index = indices[current_pos + 1];
-            } else {
-                // Wrap to top: move to first item
-                self.selected_index = indices[0];
+            let mut new_pos = current_pos;
+            loop {
+                if new_pos < indices.len() - 1 {
+                    new_pos += 1;
+                } else {
+                    // Wrap to top
+                    new_pos = 0;
+                }
+
+                let new_index = indices[new_pos];
+                // Skip empty items (separators)
+                if new_index < self.items.len() && !self.items[new_index].is_empty() {
+                    self.selected_index = new_index;
+                    break;
+                }
+
+                // Prevent infinite loop if all items are empty
+                if new_pos == current_pos {
+                    break;
+                }
             }
             self.ensure_selected_visible();
         }
@@ -1629,6 +1691,9 @@ impl App {
                 .iter()
                 .map(|p| p.name.clone().unwrap_or_else(|| p.url.clone())),
         );
+        // Add separator and Configuration option
+        items.push("".to_string()); // Empty string acts as separator
+        items.push("Configuration".to_string());
         self.items = items;
         self.reset_filter();
     }
@@ -1645,54 +1710,64 @@ impl App {
             "Live TV".to_string(),
             "Movies (VOD)".to_string(),
             "TV Series".to_string(),
-            "Configuration".to_string(),
-            "Refresh Cache".to_string(),
         ]);
+
+        // Add separator and Configuration option
+        menu_items.push("".to_string()); // Empty string acts as separator
+        menu_items.push("Configuration".to_string());
+        menu_items.push("Refresh Cache".to_string());
 
         self.items = menu_items;
         self.reset_filter();
     }
 
     async fn handle_main_menu_selection(&mut self) -> Option<Action> {
-        let has_single_provider = self.config.providers.len() == 1;
+        // Skip empty items (separators)
+        if !self.items.is_empty() && self.items[self.selected_index].is_empty() {
+            return None;
+        }
 
-        // Adjust index based on whether Favourites is shown
-        let adjusted_index = if has_single_provider {
-            self.selected_index
-        } else {
-            // No Favourites option, so all indices shift down by 1
-            self.selected_index + 1
-        };
+        let selection = &self.items[self.selected_index];
 
-        match adjusted_index {
-            0 if has_single_provider => {
-                // Load all favourites for single provider
+        match selection.as_str() {
+            "Favourites" => {
                 self.load_all_favourites().await;
                 None
             }
-            1 => {
+            "Live TV" => {
                 self.load_categories(ContentType::Live).await;
                 None
             }
-            2 => {
+            "Movies (VOD)" => {
                 self.load_categories(ContentType::Movies).await;
                 None
             }
-            3 => {
+            "TV Series" => {
                 self.load_categories(ContentType::Series).await;
                 None
             }
-            4 => {
+            "Configuration" => {
                 self.show_configuration();
                 None
             }
-            5 => self.refresh_cache().await,
+            "Refresh Cache" => self.refresh_cache().await,
             _ => None,
         }
     }
 
     fn show_configuration(&mut self) {
+        // Save current state for going back
         self.save_current_navigation_state();
+        self.previous_state_before_menu = Some(Box::new(self.state.clone()));
+        self.previous_items_before_menu = self.items.clone();
+        self.previous_nav_before_menu = NavigationState {
+            selected_index: self.selected_index,
+            scroll_offset: self.scroll_offset,
+            search_query: self.search_query.clone(),
+            filtered_indices: self.filtered_indices.clone(),
+        };
+
+        // Transition to Configuration state
         self.state = AppState::Configuration;
         self.update_configuration_items();
         self.restore_navigation_state(&AppState::Configuration);
