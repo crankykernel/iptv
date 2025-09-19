@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -13,6 +14,43 @@ use std::thread;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, warn};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaybackStatus {
+    pub is_playing: bool,
+    pub position: f64,
+    pub duration: f64,
+    pub cache_percentage: f64,
+    pub cache_duration: f64,
+    pub media_title: String,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+    pub video_bitrate: Option<f64>,
+    pub audio_bitrate: Option<f64>,
+    pub fps: Option<f64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+}
+
+impl Default for PlaybackStatus {
+    fn default() -> Self {
+        Self {
+            is_playing: false,
+            position: 0.0,
+            duration: 0.0,
+            cache_percentage: 0.0,
+            cache_duration: 0.0,
+            media_title: String::new(),
+            video_codec: None,
+            audio_codec: None,
+            video_bitrate: None,
+            audio_bitrate: None,
+            fps: None,
+            width: None,
+            height: None,
+        }
+    }
+}
 
 pub(super) struct MpvPlayer {
     socket_path: PathBuf,
@@ -509,6 +547,84 @@ impl MpvPlayer {
     /// Clear the last exit status
     pub(super) fn clear_last_exit_status(&mut self) {
         self.last_exit_status = None;
+    }
+
+    /// Get current playback status from MPV
+    pub(super) async fn get_playback_status(&self) -> Result<PlaybackStatus> {
+        if !self.is_socket_ready().await {
+            return Ok(PlaybackStatus::default());
+        }
+
+        let mut status = PlaybackStatus::default();
+
+        // Query multiple properties at once for efficiency
+        let properties = vec![
+            "pause",
+            "time-pos",
+            "duration",
+            "cache-buffering-state",
+            "demuxer-cache-duration",
+            "media-title",
+            "video-codec",
+            "audio-codec",
+            "video-bitrate",
+            "audio-bitrate",
+            "fps",
+            "width",
+            "height",
+        ];
+
+        for prop in properties {
+            if let Ok(response) = self.send_command(json!({
+                "command": ["get_property", prop]
+            })) && let Some(data) = response.get("data")
+            {
+                match prop {
+                    "pause" => {
+                        status.is_playing = !data.as_bool().unwrap_or(true);
+                    }
+                    "time-pos" => {
+                        status.position = data.as_f64().unwrap_or(0.0);
+                    }
+                    "duration" => {
+                        status.duration = data.as_f64().unwrap_or(0.0);
+                    }
+                    "cache-buffering-state" => {
+                        status.cache_percentage = data.as_f64().unwrap_or(0.0);
+                    }
+                    "demuxer-cache-duration" => {
+                        status.cache_duration = data.as_f64().unwrap_or(0.0);
+                    }
+                    "media-title" => {
+                        status.media_title = data.as_str().unwrap_or("").to_string();
+                    }
+                    "video-codec" => {
+                        status.video_codec = data.as_str().map(|s| s.to_string());
+                    }
+                    "audio-codec" => {
+                        status.audio_codec = data.as_str().map(|s| s.to_string());
+                    }
+                    "video-bitrate" => {
+                        status.video_bitrate = data.as_f64();
+                    }
+                    "audio-bitrate" => {
+                        status.audio_bitrate = data.as_f64();
+                    }
+                    "fps" => {
+                        status.fps = data.as_f64();
+                    }
+                    "width" => {
+                        status.width = data.as_i64();
+                    }
+                    "height" => {
+                        status.height = data.as_i64();
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(status)
     }
 }
 

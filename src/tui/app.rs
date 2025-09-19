@@ -22,11 +22,12 @@ impl std::fmt::Display for ContentType {
 }
 use crate::config::ProviderConfig;
 use crate::ignore::IgnoreConfig;
-use crate::player::Player;
+use crate::player::{MpvPlaybackStatus, Player};
 use crate::xtream::{ApiEpisode, Category, FavouriteStream, Stream, VodInfoResponse, XTreamAPI};
 use chrono::{DateTime, Local};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashMap;
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub enum LogDisplayMode {
@@ -147,6 +148,9 @@ pub struct App {
     previous_state_before_menu: Option<Box<AppState>>,
     previous_items_before_menu: Vec<String>,
     previous_nav_before_menu: NavigationState,
+    pub playback_status: Option<MpvPlaybackStatus>,
+    last_status_update: Instant,
+    pub current_stream_name: Option<String>,
 }
 
 impl App {
@@ -223,6 +227,9 @@ impl App {
             previous_state_before_menu: None,
             previous_items_before_menu: Vec::new(),
             previous_nav_before_menu: NavigationState::new(),
+            playback_status: None,
+            last_status_update: Instant::now(),
+            current_stream_name: None,
         }
     }
 
@@ -231,7 +238,40 @@ impl App {
         // Note: Player status check moved to async tick method in run_app
     }
 
-    pub async fn async_tick(&mut self) {
+    pub async fn async_tick(&mut self) -> bool {
+        let mut needs_redraw = false;
+
+        // Update MPV playback status periodically
+        if self.last_status_update.elapsed() > std::time::Duration::from_millis(500) {
+            // First check if MPV is actually running
+            let is_running = self.player.is_playing_tui().await;
+
+            if is_running {
+                // MPV is running, try to get status
+                if let Ok(status) = self.player.get_playback_status().await {
+                    let had_status = self.playback_status.is_some();
+                    if status.is_playing || status.position > 0.0 {
+                        self.playback_status = Some(status);
+                        needs_redraw = true; // Always redraw when we have status
+                    } else {
+                        // MPV is running but not playing anything
+                        if had_status {
+                            self.playback_status = None;
+                            needs_redraw = true; // Redraw to remove status bar
+                        }
+                    }
+                }
+            } else {
+                // MPV is not running at all
+                if self.playback_status.is_some() {
+                    self.playback_status = None;
+                    self.current_stream_name = None;
+                    needs_redraw = true; // Redraw to remove status bar
+                }
+            }
+            self.last_status_update = Instant::now();
+        }
+
         // Auto-connect to single provider on startup
         if matches!(self.state, AppState::Loading(_))
             && self.config.providers.len() == 1
@@ -254,8 +294,11 @@ impl App {
                 if let Some(message) = exit_message {
                     self.add_log(format!("⚠️ {}", message));
                 }
+                needs_redraw = true; // Redraw when player exits
             }
         }
+
+        needs_redraw
     }
 
     pub async fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {
@@ -1281,6 +1324,15 @@ impl App {
 
                         // Play the favourite using TUI-specific method
                         if let Some(api) = &self.current_api {
+                            // Store current stream name and provider
+                            self.current_stream_name = Some(favourite.name.clone());
+                            self.current_provider_name =
+                                provider.name.clone().or_else(|| Some(provider.url.clone()));
+
+                            // Force immediate status update
+                            self.last_status_update =
+                                Instant::now() - std::time::Duration::from_secs(1);
+
                             // Use .ts extension if configured for live streams
                             let extension = if favourite.stream_type == "live"
                                 && self.config.settings.use_ts_for_live
@@ -2403,6 +2455,12 @@ impl App {
 
         self.add_log(format!("Playing: {}", stream.name));
 
+        // Store current stream name
+        self.current_stream_name = Some(stream.name.clone());
+
+        // Force immediate status update
+        self.last_status_update = Instant::now() - std::time::Duration::from_secs(1);
+
         if let Some(api) = &self.current_api {
             // Use .ts extension if configured for live streams
             let extension = if stream.stream_type == "live" && self.config.settings.use_ts_for_live
@@ -2581,6 +2639,12 @@ impl App {
 
         self.add_log(format!("Playing .ts stream: {}", stream.name));
 
+        // Store current stream name
+        self.current_stream_name = Some(stream.name.clone());
+
+        // Force immediate status update
+        self.last_status_update = Instant::now() - std::time::Duration::from_secs(1);
+
         if let Some(api) = &self.current_api {
             let url = api.get_stream_url(
                 stream.stream_id,
@@ -2681,6 +2745,12 @@ impl App {
         let return_state = self.state.clone();
 
         self.add_log(format!("Playing: {}", episode.title));
+
+        // Store current episode name
+        self.current_stream_name = Some(episode.title.clone());
+
+        // Force immediate status update
+        self.last_status_update = Instant::now() - std::time::Duration::from_secs(1);
 
         if let Some(api) = &self.current_api {
             let url = api.get_stream_url(
@@ -2906,6 +2976,12 @@ impl App {
         let return_state = self.state.clone();
 
         self.add_log(format!("Playing: {}", stream.name));
+
+        // Store current stream name
+        self.current_stream_name = Some(stream.name.clone());
+
+        // Force immediate status update
+        self.last_status_update = Instant::now() - std::time::Duration::from_secs(1);
 
         if let Some(api) = &self.current_api {
             // Use the container extension from VOD info if available

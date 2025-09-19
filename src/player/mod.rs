@@ -4,7 +4,8 @@
 pub mod mpv;
 
 use anyhow::{Context, Result};
-use mpv::MpvPlayer;
+pub use mpv::PlaybackStatus as MpvPlaybackStatus;
+use mpv::{MpvPlayer, PlaybackStatus};
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -498,6 +499,17 @@ impl Player {
                 false
             }
         }
+    }
+
+    /// Get current playback status from MPV
+    pub async fn get_playback_status(&self) -> Result<PlaybackStatus> {
+        if self.use_mpv {
+            let mpv_guard = self.mpv_player.lock().await;
+            if let Some(mpv) = mpv_guard.as_ref() {
+                return mpv.get_playback_status().await;
+            }
+        }
+        Ok(PlaybackStatus::default())
     }
 
     /// Shutdown the player and clean up all resources

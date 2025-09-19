@@ -15,15 +15,27 @@ use super::widgets::{centered_rect, create_scrollable_help_widget};
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let size = frame.area();
 
-    // Main layout: Header, Content, Footer
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Header
-            Constraint::Min(0),    // Content
-            Constraint::Length(3), // Footer
-        ])
-        .split(size);
+    // Main layout: Header, Content, (Status), Footer
+    let chunks = if app.playback_status.is_some() {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Header
+                Constraint::Min(0),    // Content
+                Constraint::Length(3), // Playback status (same height as footer)
+                Constraint::Length(3), // Footer
+            ])
+            .split(size)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Header
+                Constraint::Min(0),    // Content
+                Constraint::Length(3), // Footer
+            ])
+            .split(size)
+    };
 
     // Update the visible height based on the content area size
     app.update_visible_height(chunks[1].height as usize);
@@ -34,8 +46,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Draw main content area
     draw_content(frame, app, chunks[1]);
 
-    // Draw footer
-    draw_footer(frame, app, chunks[2]);
+    // Draw playback status and footer
+    if app.playback_status.is_some() {
+        draw_playback_status(frame, app, chunks[2]);
+        draw_footer(frame, app, chunks[3]);
+    } else {
+        draw_footer(frame, app, chunks[2]);
+    }
 
     // Draw help overlay if active
     if app.show_help {
@@ -351,6 +368,130 @@ fn draw_full_window_logs(frame: &mut Frame, app: &mut App, area: Rect) {
             Paragraph::new(scrollbar_info).style(Style::default().fg(Color::Yellow)),
             scrollbar_area,
         );
+    }
+}
+
+fn draw_playback_status(frame: &mut Frame, app: &App, area: Rect) {
+    if let Some(status) = &app.playback_status {
+        // Format time as MM:SS or HH:MM:SS for longer content
+        let format_time = |seconds: f64| -> String {
+            let total_secs = seconds as u64;
+            let hours = total_secs / 3600;
+            let mins = (total_secs % 3600) / 60;
+            let secs = total_secs % 60;
+
+            if hours > 0 {
+                format!("{:02}:{:02}:{:02}", hours, mins, secs)
+            } else {
+                format!("{:02}:{:02}", mins, secs)
+            }
+        };
+
+        // Build left side: Playing status and name
+        let mut left_parts = vec![];
+
+        if status.is_playing {
+            left_parts.push("▶ Playing".to_string());
+        } else {
+            left_parts.push("⏸ Paused".to_string());
+        }
+
+        // Add provider and stream name if available
+        if let Some(ref stream_name) = app.current_stream_name {
+            // Include provider name if available
+            let full_title = if let Some(ref provider) = app.current_provider_name {
+                format!("[{}] {}", provider, stream_name)
+            } else {
+                stream_name.clone()
+            };
+
+            // Truncate title if too long
+            let max_title_len = 50;
+            let display_title = if full_title.len() > max_title_len {
+                format!("{}...", &full_title[..max_title_len - 3])
+            } else {
+                full_title
+            };
+            left_parts.push(display_title);
+        }
+
+        // Build middle: resolution
+        let mut middle_parts = vec![];
+        if let (Some(width), Some(height)) = (status.width, status.height) {
+            middle_parts.push(format!("{}x{}", width, height));
+        }
+
+        // Build right side: position/duration and buffer
+        let mut right_parts = vec![];
+
+        // Position/Duration
+        if status.duration > 0.0 {
+            right_parts.push(format!(
+                "{} / {}",
+                format_time(status.position),
+                format_time(status.duration)
+            ));
+        } else {
+            right_parts.push(format_time(status.position));
+        }
+
+        // Buffer info
+        if status.cache_duration > 0.0 {
+            right_parts.push(format!("Buffer: {:.0}s", status.cache_duration));
+        }
+
+        // Calculate spacing
+        let left_text = left_parts.join(" ");
+        let middle_text = middle_parts.join(" ");
+        let right_text = right_parts.join(" | ");
+
+        let total_width = area.width as usize;
+        let left_len = left_text.len();
+        let middle_len = middle_text.len();
+        let right_len = right_text.len();
+
+        // Build the complete status line with proper spacing
+        let status_text = if total_width > left_len + middle_len + right_len + 4 {
+            // We have enough space for everything
+            let left_padding = 1;
+            let right_padding = 1;
+            let available = total_width - left_padding - right_padding;
+
+            // Calculate positions
+            let middle_pos = (available - middle_len) / 2;
+            let right_pos = available - right_len;
+
+            // Build with spacing
+            let mut line = " ".to_string(); // Left padding
+            line.push_str(&left_text);
+
+            // Add spaces to position middle text
+            if middle_pos > left_len + 2 && !middle_text.is_empty() {
+                line.push_str(&" ".repeat(middle_pos - left_len - 1));
+                line.push_str(&middle_text);
+            }
+
+            // Add spaces to position right text
+            if right_pos > line.len() - 1 {
+                line.push_str(&" ".repeat(right_pos - line.len() + 1));
+                line.push_str(&right_text);
+            }
+
+            line
+        } else {
+            // Not enough space, just concatenate with separators
+            format!(" {} | {} | {} ", left_text, middle_text, right_text)
+        };
+
+        let status_widget = Paragraph::new(status_text)
+            .style(Style::default().fg(Color::Cyan))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Blue)),
+            );
+
+        frame.render_widget(status_widget, area);
     }
 }
 

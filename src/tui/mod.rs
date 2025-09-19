@@ -82,7 +82,7 @@ async fn run_app(tui: &mut Tui, app: &mut App) -> Result<()> {
     loop {
         // Use timeout to periodically update even without events
         let event = tokio::time::timeout(
-            std::time::Duration::from_millis(1000), // Update every second if no events
+            std::time::Duration::from_millis(250), // Update every 250ms for smooth status updates
             tui.event_handler.next(),
         )
         .await;
@@ -148,8 +148,7 @@ async fn run_app(tui: &mut Tui, app: &mut App) -> Result<()> {
             Err(_) => {
                 // Timeout - periodic update
                 app.tick();
-                app.async_tick().await; // Check player status
-                matches!(app.state, app::AppState::Playing(_)) // Only redraw if playing
+                app.async_tick().await // Returns true if redraw is needed
             }
         };
 
