@@ -1271,6 +1271,126 @@ impl App {
                 _ => {}
             },
             AppState::CrossProviderFavourites => match key.code {
+                KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Move favourite up
+                    if self.selected_index < self.cross_provider_favourites.len() {
+                        let (favourite, provider) =
+                            &self.cross_provider_favourites[self.selected_index];
+
+                        // Store the item we're moving to track it after reload
+                        let moving_stream_id = favourite.stream_id;
+                        let moving_stream_type = favourite.stream_type.clone();
+                        let moving_provider_id = provider.id.clone();
+
+                        let favourites_manager = match crate::FavouritesManager::new() {
+                            Ok(fm) => fm,
+                            Err(e) => {
+                                self.add_log(format!("Failed to access favourites: {}", e));
+                                return None;
+                            }
+                        };
+
+                        let api = match crate::XTreamAPI::new_with_id(
+                            provider.url.clone(),
+                            provider.username.clone(),
+                            provider.password.clone(),
+                            provider.name.clone(),
+                            provider.id.clone(),
+                        ) {
+                            Ok(mut api) => {
+                                api.disable_progress();
+                                api
+                            }
+                            Err(e) => {
+                                self.add_log(format!("Failed to connect: {}", e));
+                                return None;
+                            }
+                        };
+
+                        if let Ok(true) = favourites_manager.move_favourite_up(
+                            &api.provider_hash,
+                            favourite.stream_id,
+                            &favourite.stream_type,
+                        ) {
+                            self.add_log(format!("Moved {} up", favourite.name));
+                            // Reload favourites
+                            self.load_all_favourites().await;
+
+                            // Find the moved item's new position and select it
+                            if let Some(new_index) =
+                                self.cross_provider_favourites.iter().position(|(f, p)| {
+                                    f.stream_id == moving_stream_id
+                                        && f.stream_type == moving_stream_type
+                                        && p.id == moving_provider_id
+                                })
+                            {
+                                self.selected_index = new_index;
+                                // Ensure the selection is visible
+                                self.ensure_selected_visible();
+                            }
+                        }
+                    }
+                }
+                KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Move favourite down
+                    if self.selected_index < self.cross_provider_favourites.len() {
+                        let (favourite, provider) =
+                            &self.cross_provider_favourites[self.selected_index];
+
+                        // Store the item we're moving to track it after reload
+                        let moving_stream_id = favourite.stream_id;
+                        let moving_stream_type = favourite.stream_type.clone();
+                        let moving_provider_id = provider.id.clone();
+
+                        let favourites_manager = match crate::FavouritesManager::new() {
+                            Ok(fm) => fm,
+                            Err(e) => {
+                                self.add_log(format!("Failed to access favourites: {}", e));
+                                return None;
+                            }
+                        };
+
+                        let api = match crate::XTreamAPI::new_with_id(
+                            provider.url.clone(),
+                            provider.username.clone(),
+                            provider.password.clone(),
+                            provider.name.clone(),
+                            provider.id.clone(),
+                        ) {
+                            Ok(mut api) => {
+                                api.disable_progress();
+                                api
+                            }
+                            Err(e) => {
+                                self.add_log(format!("Failed to connect: {}", e));
+                                return None;
+                            }
+                        };
+
+                        if let Ok(true) = favourites_manager.move_favourite_down(
+                            &api.provider_hash,
+                            favourite.stream_id,
+                            &favourite.stream_type,
+                        ) {
+                            self.add_log(format!("Moved {} down", favourite.name));
+                            // Reload favourites
+                            self.load_all_favourites().await;
+
+                            // Find the moved item's new position and select it
+                            if let Some(new_index) =
+                                self.cross_provider_favourites.iter().position(|(f, p)| {
+                                    f.stream_id == moving_stream_id
+                                        && f.stream_type == moving_stream_type
+                                        && p.id == moving_provider_id
+                                })
+                            {
+                                self.selected_index = new_index;
+                                // Ensure the selection is visible
+                                self.ensure_selected_visible();
+                            }
+                        }
+                    }
+                }
                 KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
                 KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
                 KeyCode::PageUp => self.move_selection_page_up(),

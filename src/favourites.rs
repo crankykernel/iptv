@@ -118,4 +118,54 @@ impl FavouritesManager {
             .iter()
             .any(|f| f.stream_id == stream_id && f.stream_type == stream_type))
     }
+
+    /// Move a favourite up in the list
+    pub fn move_favourite_up(
+        &self,
+        provider_hash: &str,
+        stream_id: u32,
+        stream_type: &str,
+    ) -> Result<bool> {
+        let mut favourites = self.get_favourites(provider_hash)?;
+
+        // Find the index of the favourite
+        if let Some(index) = favourites
+            .iter()
+            .position(|f| f.stream_id == stream_id && f.stream_type == stream_type)
+        {
+            // Can only move up if not at the start
+            if index > 0 {
+                favourites.swap(index, index - 1);
+                self.save_favourites(provider_hash, favourites)?;
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Move a favourite down in the list
+    pub fn move_favourite_down(
+        &self,
+        provider_hash: &str,
+        stream_id: u32,
+        stream_type: &str,
+    ) -> Result<bool> {
+        let mut favourites = self.get_favourites(provider_hash)?;
+
+        // Find the index of the favourite
+        if let Some(index) = favourites
+            .iter()
+            .position(|f| f.stream_id == stream_id && f.stream_type == stream_type)
+        {
+            // Can only move down if not at the end
+            if index < favourites.len() - 1 {
+                favourites.swap(index, index + 1);
+                self.save_favourites(provider_hash, favourites)?;
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
 }

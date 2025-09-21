@@ -69,6 +69,16 @@ pub fn get_help_lines() -> Vec<Line<'static>> {
         Line::from("  Ctrl+C    - Force quit"),
         Line::from(""),
         Line::from(vec![Span::styled(
+            "Favourites Management:",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from("  Ctrl+↑    - Move favourite up in list"),
+        Line::from("  Ctrl+↓    - Move favourite down in list"),
+        Line::from("  f         - Remove from favourites"),
+        Line::from(""),
+        Line::from(vec![Span::styled(
             "VOD Info Mode:",
             Style::default()
                 .fg(Color::Yellow)
