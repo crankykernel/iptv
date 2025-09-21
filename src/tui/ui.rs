@@ -112,24 +112,8 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_content(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.log_display_mode {
-        LogDisplayMode::Side => {
-            // Split content area into main panel and side panel
-            let chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Min(50),    // Main content
-                    Constraint::Length(40), // Side panel (logs/info)
-                ])
-                .split(area);
-
-            // Draw main content list
-            draw_main_list(frame, app, chunks[0]);
-
-            // Draw side panel with logs and info
-            draw_side_panel(frame, app, chunks[1]);
-        }
         LogDisplayMode::None => {
-            // Use full width for main content when logs are hidden
+            // Normal view - full width for main content
             draw_main_list(frame, app, area);
         }
         LogDisplayMode::Full => {
@@ -256,55 +240,11 @@ fn draw_main_list(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn draw_side_panel(frame: &mut Frame, app: &App, area: Rect) {
-    // Just draw the logs panel using the full area
-    draw_logs_panel(frame, app, area);
-}
-
-fn draw_logs_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
-        .title(" Logs ");
-
-    let inner_area = block.inner(area);
-    frame.render_widget(block, area);
-
-    if app.logs.is_empty() {
-        return;
-    }
-
-    // Show most recent logs at the top, limited by visible area
-    let visible_count = inner_area.height as usize;
-
-    // Reverse the logs and take the most recent ones
-    let log_lines: Vec<Line> = app
-        .logs
-        .iter()
-        .rev() // Most recent first
-        .take(visible_count)
-        .map(|(timestamp, msg)| {
-            let time_str = timestamp.format("%H:%M:%S").to_string();
-            Line::from(vec![
-                Span::styled(
-                    format!("[{}] ", time_str),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(msg.clone(), Style::default().fg(Color::Gray)),
-            ])
-        })
-        .collect();
-
-    let logs = Paragraph::new(log_lines).wrap(Wrap { trim: true });
-
-    frame.render_widget(logs, inner_area);
-}
-
 fn draw_full_window_logs(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan))
-        .title(" Logs (Full View) - Press ESC to return ");
+        .title(" Logs (Full View) ");
 
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
@@ -473,26 +413,14 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         // Special footer for full log view
         if matches!(app.log_display_mode, LogDisplayMode::Full) {
-            " ↑↓/jk: Navigate | PgUp/PgDn: Page | Home/End: Jump | Esc: Return | Ctrl+.: Toggle Mode ".to_string()
+            " ↑↓/jk: Navigate | PgUp/PgDn: Page | Home/End: Jump | Esc/Ctrl+l: Return ".to_string()
         } else {
-            let log_mode_text = match app.log_display_mode {
-                LogDisplayMode::Side => "Logs→Full",
-                LogDisplayMode::None => "Show Logs",
-                LogDisplayMode::Full => "Hide Logs", // This shouldn't be reached but included for completeness
-            };
-
             match &app.state {
                 AppState::VodInfo(_) => {
-                    format!(
-                        " ↑↓: Menu | PgUp/PgDn/Space/Shift+Space: Scroll | Enter: Select | Esc/b: Back | Ctrl+.: {} | ?: Help ",
-                        log_mode_text
-                    )
+                    " ↑↓: Menu | PgUp/PgDn/Space/Shift+Space: Scroll | Enter: Select | Esc/b: Back | Ctrl+l: Logs | ?: Help ".to_string()
                 }
                 _ => {
-                    format!(
-                        " ↑↓/jk: Navigate | Enter: Select | Esc/b: Back | Ctrl+.: {} | ?: Help | q: Quit ",
-                        log_mode_text
-                    )
+                    " ↑↓/jk: Navigate | Enter: Select | Esc/b: Back | Ctrl+l: Logs | ?: Help | q: Quit ".to_string()
                 }
             }
         }

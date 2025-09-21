@@ -31,7 +31,6 @@ use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub enum LogDisplayMode {
-    Side,
     None,
     Full,
 }
@@ -201,7 +200,7 @@ impl App {
             logs: Vec::new(),
             show_help: false,
             help_scroll_offset: 0,
-            log_display_mode: LogDisplayMode::Side,
+            log_display_mode: LogDisplayMode::None,
             log_selected_index: 0,
             log_scroll_offset: 0,
             visible_height: 20, // Will be updated on first render
@@ -313,18 +312,12 @@ impl App {
             return Some(Action::Quit);
         }
 
-        // Toggle log panel with Ctrl+.
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('.') {
+        // Toggle log panel with Ctrl+l
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('l') {
             self.log_display_mode = match self.log_display_mode {
-                LogDisplayMode::Side => LogDisplayMode::None,
                 LogDisplayMode::None => LogDisplayMode::Full,
-                LogDisplayMode::Full => LogDisplayMode::Side,
+                LogDisplayMode::Full => LogDisplayMode::None,
             };
-            self.add_log(match self.log_display_mode {
-                LogDisplayMode::Side => "Log panel: side view".to_string(),
-                LogDisplayMode::None => "Log panel: hidden".to_string(),
-                LogDisplayMode::Full => "Log panel: full window".to_string(),
-            });
             return None;
         }
 
@@ -372,9 +365,8 @@ impl App {
                     return None;
                 }
                 KeyCode::Esc => {
-                    // Exit full log mode back to side panel
-                    self.log_display_mode = LogDisplayMode::Side;
-                    self.add_log("Log panel: side view".to_string());
+                    // Exit full log mode back to normal view
+                    self.log_display_mode = LogDisplayMode::None;
                     return None;
                 }
                 _ => {
