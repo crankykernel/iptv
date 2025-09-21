@@ -11,19 +11,32 @@ use ratatui::{
 
 use super::app::{App, AppState, LogDisplayMode};
 use super::widgets::{centered_rect, create_scrollable_help_widget};
+use crate::player::MpvPlaybackStatus;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let size = frame.area();
+
+    // Determine if we need 2 lines for status bar based on content
+    let status_bar_height = if let Some(status) = &app.playback_status {
+        let status_text_length = calculate_status_text_length(app, status);
+        if status_text_length > size.width as usize - 2 {
+            4 // 2 lines + borders
+        } else {
+            3 // 1 line + borders
+        }
+    } else {
+        0
+    };
 
     // Main layout: Header, Content, (Status), Footer
     let chunks = if app.playback_status.is_some() {
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Header
-                Constraint::Min(0),    // Content
-                Constraint::Length(3), // Playback status (same height as footer)
-                Constraint::Length(3), // Footer
+                Constraint::Length(3),                 // Header
+                Constraint::Min(0),                    // Content
+                Constraint::Length(status_bar_height), // Playback status (dynamic height)
+                Constraint::Length(3),                 // Footer
             ])
             .split(size)
     } else {
@@ -387,112 +400,142 @@ fn draw_playback_status(frame: &mut Frame, app: &App, area: Rect) {
             }
         };
 
-        // Build left side: Playing status and name
-        let mut left_parts = vec![];
-
-        if status.is_playing {
-            left_parts.push("▶ Playing".to_string());
+        // Build status components
+        let play_status = if status.is_playing {
+            "▶ Playing:"
         } else {
-            left_parts.push("⏸ Paused".to_string());
-        }
+            "⏸ Paused:"
+        };
 
-        // Add provider and stream name if available
-        if let Some(ref stream_name) = app.current_stream_name {
-            // Include provider name if available
-            let full_title = if let Some(ref provider) = app.current_provider_name {
-                format!("[{}] {}", provider, stream_name)
+        // Build title with provider in format "Name <Provider>"
+        let title = if let Some(ref stream_name) = app.current_stream_name {
+            if let Some(ref provider) = app.current_provider_name {
+                format!("{} <{}>", stream_name, provider)
             } else {
                 stream_name.clone()
-            };
+            }
+        } else {
+            String::new()
+        };
 
-            // Truncate title if too long
-            let max_title_len = 50;
-            let display_title = if full_title.len() > max_title_len {
-                format!("{}...", &full_title[..max_title_len - 3])
-            } else {
-                full_title
-            };
-            left_parts.push(display_title);
-        }
+        // Build metadata components
+        let mut metadata_parts = vec![];
 
-        // Build middle: resolution
-        let mut middle_parts = vec![];
+        // Resolution
         if let (Some(width), Some(height)) = (status.width, status.height) {
-            middle_parts.push(format!("{}x{}", width, height));
+            metadata_parts.push(format!("{}x{}", width, height));
         }
-
-        // Build right side: position/duration and buffer
-        let mut right_parts = vec![];
 
         // Position/Duration
         if status.duration > 0.0 {
-            right_parts.push(format!(
+            metadata_parts.push(format!(
                 "{} / {}",
                 format_time(status.position),
                 format_time(status.duration)
             ));
         } else {
-            right_parts.push(format_time(status.position));
+            metadata_parts.push(format_time(status.position));
         }
 
         // Buffer info
         if status.cache_duration > 0.0 {
-            right_parts.push(format!("Buffer: {:.0}s", status.cache_duration));
+            metadata_parts.push(format!("Buffer: {:.0}s", status.cache_duration));
         }
 
-        // Calculate spacing
-        let left_text = left_parts.join(" ");
-        let middle_text = middle_parts.join(" ");
-        let right_text = right_parts.join(" | ");
+        let metadata_text = metadata_parts.join(" | ");
 
-        let total_width = area.width as usize;
-        let left_len = left_text.len();
-        let middle_len = middle_text.len();
-        let right_len = right_text.len();
+        // Calculate if we need one or two lines
+        let available_width = area.width.saturating_sub(2) as usize; // Account for borders
+        let one_line_text = format!("{} {} | {}", play_status, title, metadata_text);
 
-        // Build the complete status line with proper spacing
-        let status_text = if total_width > left_len + middle_len + right_len + 4 {
-            // We have enough space for everything
-            let left_padding = 1;
-            let right_padding = 1;
-            let available = total_width - left_padding - right_padding;
-
-            // Calculate positions
-            let middle_pos = (available - middle_len) / 2;
-            let right_pos = available - right_len;
-
-            // Build with spacing
-            let mut line = " ".to_string(); // Left padding
-            line.push_str(&left_text);
-
-            // Add spaces to position middle text
-            if middle_pos > left_len + 2 && !middle_text.is_empty() {
-                line.push_str(&" ".repeat(middle_pos - left_len - 1));
-                line.push_str(&middle_text);
-            }
-
-            // Add spaces to position right text
-            if right_pos > line.len() - 1 {
-                line.push_str(&" ".repeat(right_pos - line.len() + 1));
-                line.push_str(&right_text);
-            }
-
-            line
+        let status_lines = if one_line_text.len() <= available_width {
+            // Everything fits on one line
+            vec![Line::from(one_line_text).style(Style::default().fg(Color::Cyan))]
         } else {
-            // Not enough space, just concatenate with separators
-            format!(" {} | {} | {} ", left_text, middle_text, right_text)
+            // Need two lines
+            let line1 = format!("{} {}", play_status, title);
+
+            // Truncate line1 if it's still too long
+            let line1 = if line1.len() > available_width {
+                let max_len = available_width.saturating_sub(3);
+                format!("{}...", &line1[..max_len.min(line1.len())])
+            } else {
+                line1
+            };
+
+            // Line 2 with metadata, indented to align after "Playing: " or "Paused: "
+            // Both have the same length (10 characters including space)
+            let indent = "          "; // 10 spaces to align with text after "Playing: "
+            let line2 = format!("{}{}", indent, metadata_text);
+
+            vec![
+                Line::from(line1).style(Style::default().fg(Color::Cyan)),
+                Line::from(line2).style(Style::default().fg(Color::Cyan)),
+            ]
         };
 
-        let status_widget = Paragraph::new(status_text)
-            .style(Style::default().fg(Color::Cyan))
+        let status_widget = Paragraph::new(status_lines)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Blue)),
-            );
+            )
+            .alignment(Alignment::Left);
 
         frame.render_widget(status_widget, area);
     }
+}
+
+// Helper function to calculate the status text length for layout decisions
+fn calculate_status_text_length(app: &App, status: &MpvPlaybackStatus) -> usize {
+    let format_time = |seconds: f64| -> String {
+        let total_secs = seconds as u64;
+        let hours = total_secs / 3600;
+        let mins = (total_secs % 3600) / 60;
+        let secs = total_secs % 60;
+
+        if hours > 0 {
+            format!("{:02}:{:02}:{:02}", hours, mins, secs)
+        } else {
+            format!("{:02}:{:02}", mins, secs)
+        }
+    };
+
+    let play_status = if status.is_playing {
+        "▶ Playing:"
+    } else {
+        "⏸ Paused:"
+    };
+
+    let title = if let Some(ref stream_name) = app.current_stream_name {
+        if let Some(ref provider) = app.current_provider_name {
+            format!("{} <{}>", stream_name, provider)
+        } else {
+            stream_name.clone()
+        }
+    } else {
+        String::new()
+    };
+
+    let mut metadata_parts = vec![];
+    if let (Some(width), Some(height)) = (status.width, status.height) {
+        metadata_parts.push(format!("{}x{}", width, height));
+    }
+    if status.duration > 0.0 {
+        metadata_parts.push(format!(
+            "{} / {}",
+            format_time(status.position),
+            format_time(status.duration)
+        ));
+    } else {
+        metadata_parts.push(format_time(status.position));
+    }
+    if status.cache_duration > 0.0 {
+        metadata_parts.push(format!("Buffer: {:.0}s", status.cache_duration));
+    }
+
+    let metadata_text = metadata_parts.join(" | ");
+    format!("{} {} | {}", play_status, title, metadata_text).len()
 }
 
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
