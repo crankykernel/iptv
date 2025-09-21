@@ -243,19 +243,26 @@ impl App {
 
         // Update MPV playback status periodically
         if self.last_status_update.elapsed() > std::time::Duration::from_millis(500) {
+            // Store previous status to detect changes
+            let previous_status = self.playback_status.clone();
+
             // First check if MPV is actually running
             let is_running = self.player.is_playing_tui().await;
 
             if is_running {
                 // MPV is running, try to get status
                 if let Ok(status) = self.player.get_playback_status().await {
-                    let had_status = self.playback_status.is_some();
                     if status.is_playing || status.position > 0.0 {
-                        self.playback_status = Some(status);
-                        needs_redraw = true; // Always redraw when we have status
+                        // Only redraw if status actually changed
+                        if previous_status.as_ref() != Some(&status) {
+                            self.playback_status = Some(status);
+                            needs_redraw = true;
+                        } else {
+                            self.playback_status = Some(status);
+                        }
                     } else {
                         // MPV is running but not playing anything
-                        if had_status {
+                        if previous_status.is_some() {
                             self.playback_status = None;
                             needs_redraw = true; // Redraw to remove status bar
                         }
@@ -967,7 +974,7 @@ impl App {
                                 .await;
                             }
                             _ => {
-                                self.play_stream(&stream).await;
+                                self.play_stream(&stream);
                             }
                         }
                     }
@@ -2449,11 +2456,11 @@ impl App {
         }
     }
 
-    async fn play_stream(&mut self, stream: &Stream) {
+    fn play_stream(&mut self, stream: &Stream) {
         // Store the current state to return to after starting playback
         let return_state = self.state.clone();
 
-        self.add_log(format!("Playing: {}", stream.name));
+        self.add_log(format!("Starting playback: {}", stream.name));
 
         // Store current stream name
         self.current_stream_name = Some(stream.name.clone());
@@ -2483,32 +2490,40 @@ impl App {
             // Log the stream URL to the logs panel
             self.add_log(format!("Stream URL: {}", url));
 
-            // Use play mode from configuration
-            let result = match self.config.settings.play_mode {
-                PlayMode::Mpv => self.player.play_tui(&url).await,
-                PlayMode::MpvInTerminal => self.player.play_in_terminal(&url).await,
-            };
+            // Clone what we need for the async task
+            let player = self.player.clone();
+            let play_mode = self.config.settings.play_mode;
+            let stream_name = stream.name.clone();
+            let url = url.clone(); // Clone URL so it survives into the spawned task
 
-            if let Err(e) = result {
-                self.state = AppState::Error(format!("Failed to play stream: {}", e));
-                self.add_log(format!("Playback failed: {}", e));
-            } else {
-                match self.config.settings.play_mode {
-                    PlayMode::Mpv => {
-                        self.add_log("Player started in background window".to_string());
-                        self.add_log("Continue browsing while video plays".to_string());
-                    }
-                    PlayMode::MpvInTerminal => {
-                        self.add_log("Player started in terminal mode".to_string());
-                    }
+            // Update UI immediately - show we're starting playback
+            match play_mode {
+                PlayMode::Mpv => {
+                    self.add_log("Starting player in background window...".to_string());
+                    self.state = return_state.clone();
                 }
-                // Return to the previous state so user can continue browsing
-                self.state = return_state;
+                PlayMode::MpvInTerminal => {
+                    self.add_log("Starting player in terminal mode...".to_string());
+                    self.state = return_state.clone();
+                }
             }
+
+            // Spawn the actual playback operation in the background
+            tokio::spawn(async move {
+                let result = match play_mode {
+                    PlayMode::Mpv => player.play_tui(&url).await,
+                    PlayMode::MpvInTerminal => player.play_in_terminal(&url).await,
+                };
+
+                if let Err(e) = result {
+                    // Log errors to stderr since we can't update the UI from here
+                    eprintln!("Failed to play stream '{}': {}", stream_name, e);
+                }
+            });
         }
     }
 
-    async fn play_stream_detached(&mut self, stream: &Stream) {
+    fn play_stream_detached(&mut self, stream: &Stream) {
         self.add_log(format!("Playing in detached window: {}", stream.name));
 
         if let Some(api) = &self.current_api {
@@ -2524,20 +2539,28 @@ impl App {
 
             // Log the stream URL to the logs panel
             self.add_log(format!("Stream URL: {}", url));
+            self.add_log("Starting player in detached window...".to_string());
+            self.add_log("The player will continue running independently".to_string());
 
-            // Use disassociated play method for fully independent window
-            if let Err(e) = self.player.play_disassociated(&url).await {
-                self.state = AppState::Error(format!("Failed to play stream: {}", e));
-                self.add_log(format!("Playback failed: {}", e));
-            } else {
-                self.add_log("Stream started in new independent window".to_string());
-                self.add_log("This window won't be affected by other playback".to_string());
-            }
+            // Clone what we need for the async task
+            let player = self.player.clone();
+            let stream_name = stream.name.clone();
+            let url = url.clone(); // Clone URL so it survives into the spawned task
+
+            // Spawn the actual playback operation in the background
+            tokio::spawn(async move {
+                if let Err(e) = player.play_disassociated(&url).await {
+                    eprintln!(
+                        "Failed to play stream '{}' in detached mode: {}",
+                        stream_name, e
+                    );
+                }
+            });
         }
     }
 
-    async fn play_stream_in_terminal(&mut self, stream: &Stream) {
-        self.add_log(format!("Playing in debug terminal: {}", stream.name));
+    fn play_stream_in_terminal(&mut self, stream: &Stream) {
+        self.add_log(format!("Starting debug terminal playback: {}", stream.name));
 
         if let Some(api) = &self.current_api {
             let url = api.get_stream_url(
@@ -2552,16 +2575,22 @@ impl App {
 
             // Log the stream URL to the logs panel
             self.add_log(format!("Stream URL: {}", url));
-            self.add_log("Launching MPV in terminal for debug output".to_string());
+            self.add_log("Launching MPV in terminal for debug output...".to_string());
 
-            // Use terminal play method for debugging
-            if let Err(e) = self.player.play_in_terminal(&url).await {
-                self.state = AppState::Error(format!("Failed to launch terminal: {}", e));
-                self.add_log(format!("Terminal launch failed: {}", e));
-            } else {
-                self.add_log("MPV launched in terminal with verbose output".to_string());
-                self.add_log("Check the terminal window for debug information".to_string());
-            }
+            // Clone what we need for the async task
+            let player = self.player.clone();
+            let stream_name = stream.name.clone();
+            let url = url.clone(); // Clone URL so it survives into the spawned task
+
+            // Spawn the actual playback operation in the background
+            tokio::spawn(async move {
+                if let Err(e) = player.play_in_terminal(&url).await {
+                    eprintln!(
+                        "Failed to launch terminal for stream '{}': {}",
+                        stream_name, e
+                    );
+                }
+            });
         }
     }
 
@@ -2603,27 +2632,27 @@ impl App {
         match self.selected_index {
             0 => {
                 // Play stream (default .m3u8) - stay in menu
-                self.play_stream(&stream).await;
+                self.play_stream(&stream);
             }
             1 => {
                 // Play stream in terminal (.m3u8) - stay in menu
-                self.play_stream_in_terminal(&stream).await;
+                self.play_stream_in_terminal(&stream);
             }
             2 => {
                 // Play .ts stream - stay in menu
-                self.play_stream_ts(&stream).await;
+                self.play_stream_ts(&stream);
             }
             3 => {
                 // Play .ts stream in terminal - stay in menu
-                self.play_stream_ts_terminal(&stream).await;
+                self.play_stream_ts_terminal(&stream);
             }
             4 => {
                 // Play stream in detached window (.m3u8) - stay in menu
-                self.play_stream_detached(&stream).await;
+                self.play_stream_detached(&stream);
             }
             5 => {
                 // Play .ts stream in detached window - stay in menu
-                self.play_stream_ts_detached(&stream).await;
+                self.play_stream_ts_detached(&stream);
             }
             6 => {
                 // Back - exit menu
@@ -2633,7 +2662,7 @@ impl App {
         }
     }
 
-    async fn play_stream_ts(&mut self, stream: &Stream) {
+    fn play_stream_ts(&mut self, stream: &Stream) {
         // Store the current state to return to after starting playback
         let return_state = self.state.clone();
 
@@ -2654,20 +2683,25 @@ impl App {
 
             self.add_log(format!("URL (.ts): {}", url));
 
-            // Run MPV in TUI-compatible mode (background)
-            if let Err(e) = self.player.play_tui(&url).await {
-                self.state = AppState::Error(format!("Failed to play stream: {}", e));
-                self.add_log(format!("Failed to play stream: {}", e));
-            } else {
-                self.add_log(format!("Started playing .ts stream: {}", stream.name));
-                self.add_log("Player started in background window".to_string());
-                // Return to the previous state so user stays in menu
-                self.state = return_state;
-            }
+            // Update state immediately
+            self.state = return_state;
+            self.add_log("Starting player in background window...".to_string());
+
+            // Clone what we need for the async task
+            let player = self.player.clone();
+            let stream_name = stream.name.clone();
+            let url = url.clone(); // Clone URL so it survives into the spawned task
+
+            // Spawn the actual playback operation in the background
+            tokio::spawn(async move {
+                if let Err(e) = player.play_tui(&url).await {
+                    eprintln!("Failed to play .ts stream '{}': {}", stream_name, e);
+                }
+            });
         }
     }
 
-    async fn play_stream_ts_terminal(&mut self, stream: &Stream) {
+    fn play_stream_ts_terminal(&mut self, stream: &Stream) {
         self.add_log(format!("Playing .ts stream in terminal: {}", stream.name));
 
         if let Some(api) = &self.current_api {
@@ -2679,18 +2713,27 @@ impl App {
 
             self.add_log(format!("URL (.ts): {}", url));
 
-            // Use terminal play method for debugging
-            if let Err(e) = self.player.play_in_terminal(&url).await {
-                self.state = AppState::Error(format!("Failed to launch terminal: {}", e));
-                self.add_log(format!("Terminal launch failed: {}", e));
-            } else {
-                self.add_log("MPV launched in terminal with verbose output".to_string());
-                self.add_log("Check the terminal window for debug information".to_string());
-            }
+            // Update UI immediately
+            self.add_log("Launching MPV in terminal for debug output...".to_string());
+
+            // Clone what we need for the async task
+            let player = self.player.clone();
+            let stream_name = stream.name.clone();
+            let url = url.clone(); // Clone URL so it survives into the spawned task
+
+            // Spawn the actual playback operation in the background
+            tokio::spawn(async move {
+                if let Err(e) = player.play_in_terminal(&url).await {
+                    eprintln!(
+                        "Failed to launch terminal for .ts stream '{}': {}",
+                        stream_name, e
+                    );
+                }
+            });
         }
     }
 
-    async fn play_stream_ts_detached(&mut self, stream: &Stream) {
+    fn play_stream_ts_detached(&mut self, stream: &Stream) {
         self.add_log(format!(
             "Playing .ts stream in detached window: {}",
             stream.name
@@ -2705,17 +2748,27 @@ impl App {
 
             self.add_log(format!("URL (.ts): {}", url));
 
-            // Use detached play method
-            match self.player.play_detached(&url).await {
-                Ok(_) => {
-                    self.add_log(format!("Detached player started for: {}", stream.name));
-                    self.add_log("Player running in separate window".to_string());
+            // Update UI immediately
+            self.add_log("Starting player in detached window...".to_string());
+            self.add_log("The player will continue running independently".to_string());
+
+            // Clone what we need for the async task
+            let player = self.player.clone();
+            let stream_name = stream.name.clone();
+            let url = url.clone(); // Clone URL so it survives into the spawned task
+
+            // Spawn the actual playback operation in the background
+            tokio::spawn(async move {
+                match player.play_detached(&url).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to play .ts stream '{}' in detached mode: {}",
+                            stream_name, e
+                        );
+                    }
                 }
-                Err(e) => {
-                    self.state = AppState::Error(format!("Failed to play stream: {}", e));
-                    self.add_log(format!("Failed to play stream: {}", e));
-                }
-            }
+            });
         }
     }
 
@@ -2966,7 +3019,7 @@ impl App {
                 self.add_log(format!("Failed to load VOD info: {}", e));
                 self.add_log("Falling back to direct playback...".to_string());
                 // Fallback to direct play
-                self.play_stream(&stream).await;
+                self.play_stream(&stream);
             }
         }
     }

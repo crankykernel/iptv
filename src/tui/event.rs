@@ -21,16 +21,16 @@ pub struct EventHandler {
 }
 
 impl EventHandler {
-    pub fn new(_tick_rate: u64) -> Self {
+    pub fn new(tick_rate: u64) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let sender_clone = sender.clone();
 
         // Use a separate thread for blocking I/O to avoid async overhead
         std::thread::spawn(move || {
             loop {
-                // Use a very short timeout (1ms) for responsive input
-                // This is still non-blocking but much more responsive
-                if event::poll(Duration::from_millis(1)).unwrap_or(false) {
+                // Use blocking poll with a timeout for periodic ticks
+                // This avoids busy-waiting and is much more efficient
+                if event::poll(Duration::from_millis(tick_rate)).unwrap_or(false) {
                     let event = match event::read() {
                         Ok(CrosstermEvent::Key(key)) => Some(Event::Key(key)),
                         Ok(CrosstermEvent::Mouse(mouse)) => Some(Event::Mouse(mouse)),
@@ -46,8 +46,10 @@ impl EventHandler {
                         break;
                     }
                 } else {
-                    // Small sleep to prevent CPU spinning when no events
-                    std::thread::sleep(Duration::from_millis(1));
+                    // Poll timed out, send a tick event for periodic updates
+                    if sender_clone.send(Event::Tick).is_err() {
+                        break;
+                    }
                 }
             }
         });
