@@ -2635,6 +2635,63 @@ impl App {
         }
     }
 
+    fn play_stream_tui_background(&mut self, stream: &Stream) {
+        // Store the current state to return to after starting playback
+        let return_state = self.state.clone();
+
+        self.add_log(format!(
+            "Starting playback in TUI background: {}",
+            stream.name
+        ));
+
+        // Store current stream name
+        self.current_stream_name = Some(stream.name.clone());
+
+        // Force immediate status update
+        self.last_status_update = Instant::now() - std::time::Duration::from_secs(1);
+
+        if let Some(api) = &self.current_api {
+            // Use .ts extension if configured for live streams
+            let extension = if stream.stream_type == "live" && self.config.settings.use_ts_for_live
+            {
+                Some("ts")
+            } else {
+                stream.container_extension.as_deref()
+            };
+
+            let url = api.get_stream_url(
+                stream.stream_id,
+                if stream.stream_type == "live" {
+                    "live"
+                } else {
+                    "movie"
+                },
+                extension,
+            );
+
+            // Log the stream URL to the logs panel
+            self.add_log(format!("Stream URL: {}", url));
+
+            // Clone what we need for the async task
+            let player = self.player.clone();
+            let stream_name = stream.name.clone();
+            let url = url.clone(); // Clone URL so it survives into the spawned task
+
+            // Update UI immediately - always use TUI background mode
+            self.add_log("Starting player in background window...".to_string());
+            self.state = return_state;
+
+            // Spawn the actual playback operation in the background
+            // Always use play_tui regardless of configuration
+            tokio::spawn(async move {
+                if let Err(e) = player.play_tui(&url).await {
+                    // Log errors to stderr since we can't update the UI from here
+                    eprintln!("Failed to play stream '{}': {}", stream_name, e);
+                }
+            });
+        }
+    }
+
     fn play_stream_detached(&mut self, stream: &Stream) {
         self.add_log(format!("Playing in detached window: {}", stream.name));
 
@@ -2743,15 +2800,15 @@ impl App {
     ) {
         match self.selected_index {
             0 => {
-                // Play stream (default .m3u8) - stay in menu
-                self.play_stream(&stream);
+                // Play stream (default .m3u8) in TUI background - ignore config
+                self.play_stream_tui_background(&stream);
             }
             1 => {
                 // Play stream in terminal (.m3u8) - stay in menu
                 self.play_stream_in_terminal(&stream);
             }
             2 => {
-                // Play .ts stream - stay in menu
+                // Play .ts stream in TUI background - ignore config
                 self.play_stream_ts(&stream);
             }
             3 => {
@@ -2795,14 +2852,14 @@ impl App {
 
             self.add_log(format!("URL (.ts): {}", url));
 
-            // Update state immediately
-            self.state = return_state;
-            self.add_log("Starting player in background window...".to_string());
-
             // Clone what we need for the async task
             let player = self.player.clone();
             let stream_name = stream.name.clone();
             let url = url.clone(); // Clone URL so it survives into the spawned task
+
+            // Update state immediately
+            self.add_log("Starting player in background window...".to_string());
+            self.state = return_state;
 
             // Spawn the actual playback operation in the background
             tokio::spawn(async move {

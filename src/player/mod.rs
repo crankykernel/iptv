@@ -22,8 +22,8 @@ pub struct Player {
 impl Clone for Player {
     fn clone(&self) -> Self {
         Self {
-            mpv_player: Arc::new(Mutex::new(None)),
-            fallback_process: Arc::new(Mutex::new(None)),
+            mpv_player: Arc::clone(&self.mpv_player),
+            fallback_process: Arc::clone(&self.fallback_process),
             use_mpv: self.use_mpv,
         }
     }
