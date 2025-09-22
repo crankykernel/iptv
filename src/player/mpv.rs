@@ -233,45 +233,18 @@ impl MpvPlayer {
         }
 
         // Start MPV with IPC socket
-        // Check if we're running in Kitty terminal - it needs special handling on Wayland
-        let is_kitty = std::env::var("TERM").unwrap_or_default().contains("kitty")
-            || std::env::var("KITTY_WINDOW_ID").is_ok();
-
-        // Use setsid to detach from parent process group on Linux
-        // This prevents MPV from being killed when parent exits
-        // Skip setsid for Kitty as it causes window management issues on Wayland
-        let mut cmd = if cfg!(target_os = "linux") && !is_kitty {
-            let mut setsid_cmd = Command::new("setsid");
-            setsid_cmd.arg("mpv");
-            setsid_cmd
-                .arg(format!("--input-ipc-server={}", self.socket_path.display()))
-                .arg("--idle=yes") // Keep MPV running even with no file
-                .arg("--keep-open=yes") // Don't close after playback
-                .arg("--no-terminal") // No terminal output in TUI mode
-                .arg("--really-quiet") // Suppress all console output
-                .arg("--player-operation-mode=pseudo-gui") // Use pseudo-gui mode for better terminal integration
-                .arg("--osc=yes") // Enable on-screen controller
-                .arg("--osd-bar=yes") // Show OSD bar
-                .arg("--title=IPTV Player (MPV)")
-                .arg("--geometry=1280x720") // Default window size
-                .arg("--autofit-larger=90%x90%"); // Max window size
-            setsid_cmd
-        } else {
-            let mut mpv_cmd = Command::new("mpv");
-            mpv_cmd
-                .arg(format!("--input-ipc-server={}", self.socket_path.display()))
-                .arg("--idle=yes") // Keep MPV running even with no file
-                .arg("--keep-open=yes") // Don't close after playback
-                .arg("--no-terminal") // No terminal output in TUI mode
-                .arg("--really-quiet") // Suppress all console output
-                .arg("--player-operation-mode=pseudo-gui") // Use pseudo-gui mode for better terminal integration
-                .arg("--osc=yes") // Enable on-screen controller
-                .arg("--osd-bar=yes") // Show OSD bar
-                .arg("--title=IPTV Player (MPV)")
-                .arg("--geometry=1280x720") // Default window size
-                .arg("--autofit-larger=90%x90%"); // Max window size
-            mpv_cmd
-        };
+        let mut cmd = Command::new("mpv");
+        cmd.arg(format!("--input-ipc-server={}", self.socket_path.display()))
+            .arg("--idle=yes") // Keep MPV running even with no file
+            .arg("--keep-open=yes") // Don't close after playback
+            .arg("--no-terminal") // No terminal output in TUI mode
+            .arg("--really-quiet") // Suppress all console output
+            .arg("--player-operation-mode=pseudo-gui") // Use pseudo-gui mode for better terminal integration
+            .arg("--osc=yes") // Enable on-screen controller
+            .arg("--osd-bar=yes") // Show OSD bar
+            .arg("--title=IPTV Player (MPV)")
+            .arg("--geometry=1280x720") // Default window size
+            .arg("--autofit-larger=90%x90%"); // Max window size
 
         // Pipe stdout/stderr to consume them
         cmd.stdout(Stdio::piped())
@@ -322,7 +295,7 @@ impl MpvPlayer {
         // Wait for IPC socket to be ready
         for i in 0..20 {
             // Wait up to 10 seconds
-            sleep(Duration::from_millis(500)).await;
+            sleep(Duration::from_millis(100)).await;
 
             // Check if process is still running
             if let Some(ref mut proc) = self.mpv_process {

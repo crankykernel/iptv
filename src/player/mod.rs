@@ -187,7 +187,6 @@ impl Player {
         // Try different terminal emulators in order of preference
         let terminals = [
             ("alacritty", vec!["-e"]),
-            ("kitty", vec![]),
             ("konsole", vec!["-e"]),
             ("gnome-terminal", vec!["--"]),
             ("xfce4-terminal", vec!["-x"]),
@@ -211,7 +210,7 @@ impl Player {
         }
 
         let (terminal, term_args) = terminal_cmd.ok_or_else(|| {
-            anyhow::anyhow!("No terminal emulator found. Please install one of: alacritty, kitty, konsole, gnome-terminal, xfce4-terminal, mate-terminal, or xterm")
+            anyhow::anyhow!("No terminal emulator found. Please install one of: alacritty, konsole, gnome-terminal, xfce4-terminal, mate-terminal, or xterm")
         })?;
 
         let mut cmd = Command::new(&terminal);
