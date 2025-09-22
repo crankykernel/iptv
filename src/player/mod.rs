@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: (C) 2025 Cranky Kernel <crankykernel@proton.me>
 
+pub mod ffplay;
 pub mod mpv;
 
 use anyhow::{Context, Result};
+use ffplay::FfplayPlayer;
 pub use mpv::PlaybackStatus as MpvPlaybackStatus;
 use mpv::{MpvPlayer, PlaybackStatus};
 use std::io::{BufRead, BufReader};
@@ -15,6 +17,7 @@ use tracing::{debug, error, warn};
 
 pub struct Player {
     mpv_player: Arc<Mutex<Option<MpvPlayer>>>,
+    ffplay_player: Arc<Mutex<Option<FfplayPlayer>>>,
     fallback_process: Arc<Mutex<Option<Child>>>,
     use_mpv: bool,
 }
@@ -23,6 +26,7 @@ impl Clone for Player {
     fn clone(&self) -> Self {
         Self {
             mpv_player: Arc::clone(&self.mpv_player),
+            ffplay_player: Arc::clone(&self.ffplay_player),
             fallback_process: Arc::clone(&self.fallback_process),
             use_mpv: self.use_mpv,
         }
@@ -43,6 +47,7 @@ impl Player {
 
         Self {
             mpv_player: Arc::new(Mutex::new(None)),
+            ffplay_player: Arc::new(Mutex::new(None)),
             fallback_process: Arc::new(Mutex::new(None)),
             use_mpv,
         }
@@ -529,6 +534,75 @@ impl Player {
             let _ = child.wait();
         }
 
+        Ok(())
+    }
+
+    /// Check if ffplay is available on the system
+    pub fn is_ffplay_available() -> bool {
+        FfplayPlayer::is_available()
+    }
+
+    /// Play video with ffplay
+    pub async fn play_ffplay(&self, url: &str) -> Result<()> {
+        if !Self::is_ffplay_available() {
+            return Err(anyhow::anyhow!(
+                "ffplay is not installed. Please install ffmpeg to use ffplay."
+            ));
+        }
+
+        let mut ffplay_guard = self.ffplay_player.lock().await;
+        if ffplay_guard.is_none() {
+            *ffplay_guard = Some(FfplayPlayer::new());
+        }
+
+        if let Some(ffplay) = ffplay_guard.as_mut() {
+            ffplay.play(url)?;
+        }
+
+        Ok(())
+    }
+
+    /// Play video with ffplay in terminal (with visible output)
+    pub async fn play_ffplay_in_terminal(&self, url: &str) -> Result<()> {
+        if !Self::is_ffplay_available() {
+            return Err(anyhow::anyhow!(
+                "ffplay is not installed. Please install ffmpeg to use ffplay."
+            ));
+        }
+
+        let mut ffplay_guard = self.ffplay_player.lock().await;
+        if ffplay_guard.is_none() {
+            *ffplay_guard = Some(FfplayPlayer::new());
+        }
+
+        if let Some(ffplay) = ffplay_guard.as_mut() {
+            ffplay.play_in_terminal(url)?;
+        }
+
+        Ok(())
+    }
+
+    /// Play video with ffplay in detached mode
+    pub async fn play_ffplay_detached(&self, url: &str) -> Result<()> {
+        if !Self::is_ffplay_available() {
+            return Err(anyhow::anyhow!(
+                "ffplay is not installed. Please install ffmpeg to use ffplay."
+            ));
+        }
+
+        // For detached mode, we don't store the process
+        let ffplay = FfplayPlayer::new();
+        ffplay.play_detached(url)?;
+
+        Ok(())
+    }
+
+    /// Stop ffplay playback
+    pub async fn stop_ffplay(&self) -> Result<()> {
+        let mut ffplay_guard = self.ffplay_player.lock().await;
+        if let Some(ffplay) = ffplay_guard.as_mut() {
+            ffplay.stop();
+        }
         Ok(())
     }
 }

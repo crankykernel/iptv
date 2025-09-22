@@ -10,8 +10,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use tokio::time::sleep;
 use tracing::{debug, error, warn};
 
@@ -57,6 +59,9 @@ pub(super) struct MpvPlayer {
     mpv_process: Option<Child>,
     last_exit_status: Option<std::process::ExitStatus>,
     is_shared_instance: bool,
+    socket_ready: Arc<RwLock<bool>>,
+    pending_play: Arc<RwLock<Option<String>>>,
+    socket_monitor_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Default for MpvPlayer {
@@ -75,6 +80,9 @@ impl MpvPlayer {
             mpv_process: None,
             last_exit_status: None,
             is_shared_instance: true,
+            socket_ready: Arc::new(RwLock::new(false)),
+            pending_play: Arc::new(RwLock::new(None)),
+            socket_monitor_handle: None,
         }
     }
 
@@ -145,6 +153,9 @@ impl MpvPlayer {
             mpv_process: None,
             last_exit_status: None,
             is_shared_instance: true,
+            socket_ready: Arc::new(RwLock::new(false)),
+            pending_play: Arc::new(RwLock::new(None)),
+            socket_monitor_handle: None,
         };
 
         // Check if the socket is actually responding
@@ -212,19 +223,28 @@ impl MpvPlayer {
         }
     }
 
-    /// Launch MPV with IPC socket enabled
+    /// Launch MPV with IPC socket enabled - non-blocking version
     pub(super) async fn launch(&mut self) -> Result<()> {
         debug!("Launching MPV with IPC socket at {:?}", self.socket_path);
 
         // Check if MPV is already running
         if self.is_socket_ready().await {
             debug!("MPV is already running, skipping launch");
+            *self.socket_ready.write().await = true;
             return Ok(());
         }
 
-        // Stop any existing process
+        // Mark socket as not ready
+        *self.socket_ready.write().await = false;
+
+        // Stop any existing process and monitor
         if self.mpv_process.is_some() {
             self.stop().await?;
+        }
+
+        // Cancel any existing monitor task
+        if let Some(handle) = self.socket_monitor_handle.take() {
+            handle.abort();
         }
 
         // Clean up old socket if it exists
@@ -289,63 +309,136 @@ impl MpvPlayer {
             });
         }
 
+        let process_id = child.id();
         self.mpv_process = Some(child);
-        debug!("MPV process started, waiting for IPC socket...");
+        debug!(
+            "MPV process started (PID: {}), starting background socket monitor",
+            process_id
+        );
 
-        // Wait for IPC socket to be ready
-        for i in 0..20 {
-            // Wait up to 10 seconds
-            sleep(Duration::from_millis(100)).await;
+        // Spawn a background task to monitor socket readiness
+        let socket_path = self.socket_path.clone();
+        let socket_ready = Arc::clone(&self.socket_ready);
+        let pending_play = Arc::clone(&self.pending_play);
 
-            // Check if process is still running
-            if let Some(ref mut proc) = self.mpv_process {
-                match proc.try_wait() {
-                    Ok(Some(status)) => {
-                        error!("MPV process exited unexpectedly with status: {:?}", status);
-                        return Err(anyhow::anyhow!(
-                            "MPV process exited unexpectedly with status: {:?}",
-                            status
-                        ));
-                    }
-                    Ok(None) => {
-                        // Process is still running
-                    }
-                    Err(e) => {
-                        warn!("Failed to check MPV process status: {}", e);
+        let monitor_handle = tokio::spawn(async move {
+            debug!("Socket monitor task started");
+            let mut attempts = 0;
+            const MAX_ATTEMPTS: u32 = 100; // 10 seconds with 100ms intervals
+
+            while attempts < MAX_ATTEMPTS {
+                // Check if socket is ready
+                if socket_path.exists()
+                    && let Ok(mut socket) = UnixStream::connect(&socket_path)
+                {
+                    // Try a simple get_property command
+                    let command = json!({
+                        "command": ["get_property", "mpv-version"]
+                    });
+
+                    if let Ok(command_str) = serde_json::to_string(&command)
+                        && socket.write_all(command_str.as_bytes()).is_ok()
+                        && socket.write_all(b"\n").is_ok()
+                    {
+                        debug!("MPV IPC socket is ready after {} ms", attempts * 100);
+                        *socket_ready.write().await = true;
+
+                        // Check if there's a pending play command
+                        if let Some(url) = pending_play.write().await.take() {
+                            debug!("Executing pending play command for URL: {}", url);
+                            // We can't directly play from here, but we've marked socket as ready
+                            // The play() method will check and proceed
+                        }
+
+                        return;
                     }
                 }
+
+                attempts += 1;
+                sleep(Duration::from_millis(100)).await;
             }
 
-            if self.is_socket_ready().await {
-                debug!("MPV IPC socket ready after {} ms", (i + 1) * 500);
-                return Ok(());
-            }
-            debug!("MPV IPC socket not ready yet, attempt {}/20", i + 1);
-        }
+            error!(
+                "MPV IPC socket failed to become ready after {} seconds",
+                MAX_ATTEMPTS / 10
+            );
+            *socket_ready.write().await = false;
+        });
 
-        error!("MPV IPC socket failed to start after 10 seconds");
-        Err(anyhow::anyhow!(
-            "MPV IPC socket failed to start after 10 seconds"
-        ))
+        self.socket_monitor_handle = Some(monitor_handle);
+
+        // Return immediately - socket monitoring happens in background
+        Ok(())
     }
 
-    /// Play or replace current video with new URL
+    /// Play or replace current video with new URL - non-blocking version
     pub(super) async fn play(&self, video_url: &str) -> Result<()> {
         debug!("Playing video: {}", video_url);
 
-        // Check if MPV is still running
-        if !self.is_socket_ready().await {
-            warn!("MPV is not running, cannot play video");
-            return Err(anyhow::anyhow!(
-                "MPV is not running. Please restart the player."
-            ));
+        // Check if socket is ready
+        let is_ready = *self.socket_ready.read().await;
+        if !is_ready {
+            // If not ready, wait a bit for it to become ready (non-blocking)
+            debug!("Socket not ready yet, waiting for it to become available...");
+
+            // Store the URL as pending
+            *self.pending_play.write().await = Some(video_url.to_string());
+
+            // Wait for socket to be ready (with timeout)
+            let max_wait = Duration::from_secs(10);
+            let start = tokio::time::Instant::now();
+
+            while start.elapsed() < max_wait {
+                if *self.socket_ready.read().await {
+                    debug!("Socket became ready, proceeding with playback");
+                    break;
+                }
+
+                // Use a short sleep to avoid busy-waiting
+                sleep(Duration::from_millis(100)).await;
+            }
+
+            // Final check
+            if !*self.socket_ready.read().await {
+                warn!("MPV socket not ready after waiting, cannot play video");
+                return Err(anyhow::anyhow!(
+                    "MPV is not ready. Please wait for it to initialize."
+                ));
+            }
         }
 
-        // Stop current playback first
-        let _ = self.send_command(json!({
-            "command": ["stop"]
-        }));
+        // Clear pending play since we're about to play it
+        *self.pending_play.write().await = None;
 
+        // Spawn the actual play operation in a detached task to avoid blocking
+        let socket_path = self.socket_path.clone();
+        let video_url = video_url.to_string();
+
+        tokio::spawn(async move {
+            // Small initial delay to ensure socket is fully ready
+            sleep(Duration::from_millis(100)).await;
+
+            // Try to send the play command
+            if let Err(e) = Self::send_play_command(&socket_path, &video_url).await {
+                error!("Failed to play video: {}", e);
+            }
+        });
+
+        Ok(())
+    }
+
+    /// Helper method to send play command (can be called from static context)
+    async fn send_play_command(socket_path: &PathBuf, video_url: &str) -> Result<()> {
+        // Stop current playback first
+        if let Ok(mut socket) = UnixStream::connect(socket_path) {
+            let stop_cmd = json!({ "command": ["stop"] });
+            if let Ok(cmd_str) = serde_json::to_string(&stop_cmd) {
+                let _ = socket.write_all(cmd_str.as_bytes());
+                let _ = socket.write_all(b"\n");
+            }
+        }
+
+        // Small delay between stop and play
         sleep(Duration::from_millis(100)).await;
 
         // Try to load the video with retries
@@ -364,55 +457,37 @@ impl MpvPlayer {
                     delay_ms
                 );
                 sleep(Duration::from_millis(delay_ms)).await;
-
-                // Stop any partial playback from previous attempt
-                let _ = self.send_command(json!({
-                    "command": ["stop"]
-                }));
-                sleep(Duration::from_millis(100)).await;
             }
 
-            // Load and play the new video
-            let command = json!({
-                "command": ["loadfile", video_url, "replace"]
-            });
-
-            match self.send_command(command) {
-                Ok(_) => {
-                    // Wait a bit to see if the stream actually starts
-                    sleep(Duration::from_millis(500)).await;
-
-                    // Check if playback actually started by checking if file is loaded
-                    let check_command = json!({
-                        "command": ["get_property", "filename"]
+            // Try to connect and send play command
+            match UnixStream::connect(socket_path) {
+                Ok(mut socket) => {
+                    let play_cmd = json!({
+                        "command": ["loadfile", video_url, "replace"]
                     });
 
-                    match self.send_command(check_command) {
-                        Ok(_) => {
-                            if attempt > 0 {
-                                debug!(
-                                    "Successfully started playing video in MPV after {} retries",
-                                    attempt
-                                );
-                            } else {
-                                debug!("Successfully started playing video in MPV");
-                            }
+                    if let Ok(cmd_str) = serde_json::to_string(&play_cmd)
+                        && socket.write_all(cmd_str.as_bytes()).is_ok()
+                        && socket.write_all(b"\n").is_ok()
+                    {
+                        // Read response
+                        let mut reader = BufReader::new(socket);
+                        let mut response = String::new();
+                        if reader.read_line(&mut response).is_ok()
+                            && let Ok(parsed) = serde_json::from_str::<Value>(&response)
+                            && let Some(error) = parsed.get("error").and_then(|e| e.as_str())
+                            && error == "success"
+                        {
+                            debug!("Successfully sent play command to MPV");
                             return Ok(());
                         }
-                        Err(e) => {
-                            warn!("Stream may not have started properly: {}", e);
-                            last_error = Some(e);
-                        }
                     }
+
+                    last_error = Some(anyhow::anyhow!("Failed to send play command"));
                 }
                 Err(e) => {
-                    warn!(
-                        "Failed to send play command to MPV (attempt {}/{}): {}",
-                        attempt + 1,
-                        MAX_RETRIES,
-                        e
-                    );
-                    last_error = Some(e);
+                    warn!("Failed to connect to MPV socket: {}", e);
+                    last_error = Some(e.into());
                 }
             }
         }
@@ -428,6 +503,14 @@ impl MpvPlayer {
 
     /// Stop MPV playback and optionally kill the process
     pub(super) async fn stop(&mut self) -> Result<()> {
+        // Cancel socket monitor if running
+        if let Some(handle) = self.socket_monitor_handle.take() {
+            handle.abort();
+        }
+
+        // Mark socket as not ready
+        *self.socket_ready.write().await = false;
+
         self.stop_with_kill(true).await
     }
 
@@ -468,6 +551,15 @@ impl MpvPlayer {
     /// Force shutdown MPV
     pub(super) async fn shutdown(&mut self) -> Result<()> {
         debug!("Shutting down MPV player");
+
+        // Cancel socket monitor if running
+        if let Some(handle) = self.socket_monitor_handle.take() {
+            handle.abort();
+        }
+
+        // Mark socket as not ready
+        *self.socket_ready.write().await = false;
+
         self.stop_with_kill(true).await
     }
 
@@ -608,6 +700,11 @@ impl MpvPlayer {
 
 impl Drop for MpvPlayer {
     fn drop(&mut self) {
+        // Cancel socket monitor if running
+        if let Some(handle) = self.socket_monitor_handle.take() {
+            handle.abort();
+        }
+
         // Clean up MPV process on drop
         if let Some(mut child) = self.mpv_process.take() {
             match child.try_wait() {
