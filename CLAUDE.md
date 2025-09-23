@@ -75,11 +75,13 @@ cargo fmt -- --check
 - **Favourites** (`src/favourites.rs`): Persistent cross-provider favourite management
 - **Configuration** (`src/config.rs`): TOML-based multi-provider configuration
 
-**Media Playback** (`src/player/mod.rs`, `src/player/mpv.rs`):
-- Abstract player interface with MPV implementation
+**Media Playback** (`src/player/mod.rs`, `src/player/mpv.rs`, `src/player/ffplay.rs`):
+- Abstract player interface with MPV as primary implementation
+- Non-blocking MPV launch with background socket monitoring for responsive TUI
 - Multiple playback modes: TUI (background with RPC), terminal (visible output), detached (exits after launch), disassociated (independent)
 - RPC support via Unix socket for controlling existing MPV instances
 - Automatic detection and reuse of running MPV instances
+- Experimental ffplay support as fallback player option
 
 ### State Management
 
@@ -100,13 +102,16 @@ The TUI uses a state machine pattern (`AppState` enum) to manage navigation:
 
 ## Key Implementation Details
 
-- **Async Operations**: All API calls use tokio for non-blocking I/O
+- **Async Operations**: All API calls and MPV operations use tokio for non-blocking I/O
 - **Error Handling**: Comprehensive error propagation with anyhow
 - **Progress Indication**: Visual feedback during long operations
 - **Fuzzy Search**: Real-time filtering using fuzzy-matcher (case-insensitive)
 - **State Preservation**: Navigation state saved when drilling into content
 - **Cross-Provider Support**: Unified favourite system across multiple providers
-- **MPV Integration**: Smart RPC support with socket at `~/.local/state/iptv/mpv.sock`
+- **MPV Integration**:
+  - Smart RPC support with socket at `~/.local/state/iptv/mpv.sock`
+  - Non-blocking socket monitoring prevents TUI freezing during startup
+  - Async state management with Arc<RwLock<>> for thread-safe operations
 - **Ignore System**: Pattern-based filtering of unwanted streams/categories
 
 ## Code Quality Standards
@@ -129,7 +134,8 @@ src/
 ├── ignore.rs         # Ignore patterns system
 ├── player/
 │   ├── mod.rs        # Player abstraction layer
-│   └── mpv.rs        # MPV implementation with RPC
+│   ├── mpv.rs        # MPV implementation with non-blocking RPC
+│   └── ffplay.rs     # FFplay fallback implementation
 ├── tui/
 │   ├── mod.rs        # TUI module root
 │   ├── app.rs        # Application state and logic
