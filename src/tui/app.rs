@@ -2783,6 +2783,9 @@ impl App {
             "Play .ts stream in terminal".to_string(),
             "Play stream in detached window (.m3u8)".to_string(),
             "Play .ts stream in detached window".to_string(),
+            "Play with ffplay".to_string(),
+            "Play with ffplay in terminal".to_string(),
+            "Play with ffplay detached".to_string(),
             "Back".to_string(),
         ];
 
@@ -2824,6 +2827,18 @@ impl App {
                 self.play_stream_ts_detached(&stream);
             }
             6 => {
+                // Play with ffplay
+                self.play_stream_ffplay(&stream);
+            }
+            7 => {
+                // Play with ffplay in terminal
+                self.play_stream_ffplay_terminal(&stream);
+            }
+            8 => {
+                // Play with ffplay detached
+                self.play_stream_ffplay_detached(&stream);
+            }
+            9 => {
                 // Back - exit menu
                 self.restore_previous_state();
             }
@@ -2936,6 +2951,97 @@ impl App {
                             stream_name, e
                         );
                     }
+                }
+            });
+        }
+    }
+
+    fn play_stream_ffplay(&mut self, stream: &Stream) {
+        self.add_log(format!("Playing with ffplay: {}", stream.name));
+
+        if let Some(api) = &self.current_api {
+            let url = api.get_stream_url(
+                stream.stream_id,
+                if stream.stream_type == "live" {
+                    "live"
+                } else {
+                    "movie"
+                },
+                stream.container_extension.as_deref(),
+            );
+
+            self.add_log(format!("Stream URL: {}", url));
+            self.add_log("Starting ffplay...".to_string());
+
+            // Clone what we need for the async task
+            let player = self.player.clone();
+
+            // Spawn the actual playback operation in the background
+            tokio::spawn(async move {
+                if let Err(e) = player.play_ffplay(&url).await {
+                    eprintln!("Failed to start ffplay: {}", e);
+                }
+            });
+        }
+    }
+
+    fn play_stream_ffplay_terminal(&mut self, stream: &Stream) {
+        self.add_log(format!("Playing with ffplay in terminal: {}", stream.name));
+
+        if let Some(api) = &self.current_api {
+            let url = api.get_stream_url(
+                stream.stream_id,
+                if stream.stream_type == "live" {
+                    "live"
+                } else {
+                    "movie"
+                },
+                stream.container_extension.as_deref(),
+            );
+
+            self.add_log(format!("Stream URL: {}", url));
+            self.add_log("Starting ffplay in terminal...".to_string());
+
+            // Clone what we need for the async task
+            let player = self.player.clone();
+
+            // Spawn the actual playback operation in the background
+            tokio::spawn(async move {
+                if let Err(e) = player.play_ffplay_in_terminal(&url).await {
+                    eprintln!("Failed to start ffplay in terminal: {}", e);
+                }
+            });
+        }
+    }
+
+    fn play_stream_ffplay_detached(&mut self, stream: &Stream) {
+        self.add_log(format!(
+            "Playing with ffplay in detached window: {}",
+            stream.name
+        ));
+
+        if let Some(api) = &self.current_api {
+            let url = api.get_stream_url(
+                stream.stream_id,
+                if stream.stream_type == "live" {
+                    "live"
+                } else {
+                    "movie"
+                },
+                stream.container_extension.as_deref(),
+            );
+
+            self.add_log(format!("Stream URL: {}", url));
+            self.add_log("Starting ffplay in detached window...".to_string());
+            self.add_log("The player will continue running independently".to_string());
+
+            // Clone what we need for the async task
+            let player = self.player.clone();
+
+            // Spawn the actual playback operation in the background
+            tokio::spawn(async move {
+                if let Err(e) = player.play_ffplay_detached(&url).await {
+                    eprintln!("Failed to start ffplay detached: {}", e);
                 }
             });
         }
