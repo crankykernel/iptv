@@ -6,11 +6,6 @@ TUI to browser channels, and MPV for playing video.
 **Note**: This project is almost completely coded by an AI agent,
 guided by an experienced software developer.
 
-### System Requirements
-- Linux/macOS/Windows (Linux recommended)
-- Terminal with UTF-8 support
-- Internet connection for IPTV streaming
-
 ## Installation
 
 ```
