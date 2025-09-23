@@ -15,10 +15,7 @@ use iptv::xtream::XTreamAPI;
 use iptv::{Config, Player};
 
 mod cli;
-use cli::{
-    CacheCommand, CommandContext, ContentType, FavoritesCommand, InfoCommand, ListCommand,
-    OutputFormat, PlayCommand, ProvidersCommand, SearchCommand,
-};
+use cli::{CacheCommand, CommandContext, ContentType, OutputFormat, SearchCommand};
 
 fn cargo_style() -> Styles {
     Styles::styled()
@@ -74,18 +71,6 @@ struct CliCommands {
 
 #[derive(Subcommand)]
 enum CliSubcommands {
-    /// Play stream/movie/episode by ID
-    Play {
-        /// Stream/Movie/Series ID
-        id: u32,
-        /// Content type (live, movie, series)
-        #[arg(short = 't', long)]
-        r#type: Option<String>,
-        /// Play in detached window
-        #[arg(short, long)]
-        detached: bool,
-    },
-
     /// Search content across providers
     Search {
         /// Search query
@@ -98,147 +83,9 @@ enum CliSubcommands {
         format: String,
     },
 
-    /// List streams/movies/series
-    #[command(subcommand)]
-    List(ListSubCommand),
-
-    /// Get detailed information about content
-    Info {
-        /// Content ID
-        id: u32,
-        /// Content type (live, movie, series)
-        #[arg(short = 't', long)]
-        r#type: String,
-        /// Output format (text, json)
-        #[arg(short, long, default_value = "text")]
-        format: String,
-    },
-
-    /// Get stream URL
-    Url {
-        /// Content ID
-        id: u32,
-        /// Content type (live, movie, series)
-        #[arg(short = 't', long)]
-        r#type: String,
-    },
-
-    /// Manage favorites
-    #[command(subcommand)]
-    Fav(FavCommand),
-
     /// Manage cache
     #[command(subcommand)]
     Cache(CacheSubCommand),
-
-    /// Manage providers
-    #[command(subcommand)]
-    Providers(ProvidersSubCommand),
-
-    /// Interactively add a new provider
-    AddProvider,
-}
-
-#[derive(Subcommand)]
-enum ListSubCommand {
-    /// List live TV streams
-    Live {
-        /// Category ID for filtering
-        #[arg(long)]
-        category: Option<String>,
-        /// Output format (text, json, m3u)
-        #[arg(short, long, default_value = "text")]
-        format: String,
-        /// Limit number of results
-        #[arg(short, long)]
-        limit: Option<usize>,
-    },
-    /// List movies/VOD
-    Movie {
-        /// Category ID for filtering
-        #[arg(long)]
-        category: Option<String>,
-        /// Output format (text, json, m3u)
-        #[arg(short, long, default_value = "text")]
-        format: String,
-        /// Limit number of results
-        #[arg(short, long)]
-        limit: Option<usize>,
-    },
-    /// List movies/VOD (alias for movie)
-    Movies {
-        /// Category ID for filtering
-        #[arg(long)]
-        category: Option<String>,
-        /// Output format (text, json, m3u)
-        #[arg(short, long, default_value = "text")]
-        format: String,
-        /// Limit number of results
-        #[arg(short, long)]
-        limit: Option<usize>,
-    },
-    /// List movies/VOD (alias for movie)
-    Vod {
-        /// Category ID for filtering
-        #[arg(long)]
-        category: Option<String>,
-        /// Output format (text, json, m3u)
-        #[arg(short, long, default_value = "text")]
-        format: String,
-        /// Limit number of results
-        #[arg(short, long)]
-        limit: Option<usize>,
-    },
-    /// List TV series
-    Series {
-        /// Category ID for filtering
-        #[arg(long)]
-        category: Option<String>,
-        /// Output format (text, json, m3u)
-        #[arg(short, long, default_value = "text")]
-        format: String,
-        /// Limit number of results
-        #[arg(short, long)]
-        limit: Option<usize>,
-    },
-    /// List TV series (alias for series)
-    Tv {
-        /// Category ID for filtering
-        #[arg(long)]
-        category: Option<String>,
-        /// Output format (text, json, m3u)
-        #[arg(short, long, default_value = "text")]
-        format: String,
-        /// Limit number of results
-        #[arg(short, long)]
-        limit: Option<usize>,
-    },
-}
-
-#[derive(Subcommand)]
-enum FavCommand {
-    /// List favorites
-    List {
-        /// Output format (text, json, m3u)
-        #[arg(short, long, default_value = "text")]
-        format: String,
-    },
-    /// Add to favorites
-    Add {
-        /// Content ID
-        id: u32,
-        /// Content type (live, movie, series)
-        #[arg(short = 't', long)]
-        r#type: String,
-        /// Optional name override
-        #[arg(short, long)]
-        name: Option<String>,
-    },
-    /// Remove from favorites
-    Remove {
-        /// Content ID
-        id: u32,
-    },
 }
 
 #[derive(Subcommand)]
@@ -247,21 +94,6 @@ enum CacheSubCommand {
     Refresh,
     /// Clear cache
     Clear,
-}
-
-#[derive(Subcommand)]
-enum ProvidersSubCommand {
-    /// List configured providers
-    List {
-        /// Output format (text, json)
-        #[arg(short, long, default_value = "text")]
-        format: String,
-    },
-    /// Test provider connections
-    Test {
-        /// Optional provider name to test
-        name: Option<String>,
-    },
 }
 
 #[derive(Parser)]
@@ -304,87 +136,6 @@ enum ApiSubcommand {
     SeriesInfo { id: u32 },
     /// Get VOD info
     VodInfo { id: u32 },
-}
-
-async fn add_provider_interactively(config_path: PathBuf) -> Result<()> {
-    use std::io::{self, Write};
-
-    println!("Adding a new Xtreme API provider to your configuration");
-    println!("Please provide the following information:");
-
-    print!("Provider Name (e.g., 'MyIPTV'): ");
-    io::stdout().flush()?;
-    let mut name = String::new();
-    io::stdin().read_line(&mut name)?;
-    let name = name.trim().to_string();
-
-    print!("Server URL (e.g., http://example.com:8080): ");
-    io::stdout().flush()?;
-    let mut url = String::new();
-    io::stdin().read_line(&mut url)?;
-    let url = url.trim().to_string();
-
-    print!("Username: ");
-    io::stdout().flush()?;
-    let mut username = String::new();
-    io::stdin().read_line(&mut username)?;
-    let username = username.trim().to_string();
-
-    print!("Password: ");
-    io::stdout().flush()?;
-    let mut password = String::new();
-    io::stdin().read_line(&mut password)?;
-    let password = password.trim().to_string();
-
-    // Test the connection
-    println!("\nTesting connection...");
-    let mut test_api = XTreamAPI::new(
-        url.clone(),
-        username.clone(),
-        password.clone(),
-        Some(name.clone()),
-    )?;
-
-    match test_api.get_user_info().await {
-        Ok(info) => {
-            println!("✓ Connection successful!");
-            println!("  Account: {}", info.username);
-            println!("  Status: {}", info.status);
-        }
-        Err(e) => {
-            eprintln!("✗ Connection failed: {}", e);
-            eprintln!("Provider will be added anyway, but please check your credentials.");
-        }
-    }
-
-    // Load existing config or create new
-    let mut config = if config_path.exists() {
-        Config::load(&config_path)?
-    } else {
-        Config::default()
-    };
-
-    // Add the new provider
-    let provider = ProviderConfig {
-        id: None,
-        name: Some(name.clone()),
-        url,
-        username,
-        password,
-    };
-
-    config.providers.push(provider);
-
-    // Save the updated config
-    config.save(&config_path)?;
-
-    println!(
-        "\n✓ Provider '{}' has been added to {}",
-        name,
-        config_path.display()
-    );
-
-    Ok(())
 }
 
 async fn run_rofi_menu(providers: Vec<ProviderConfig>, player: Player) -> Result<()> {
@@ -670,7 +421,7 @@ async fn main() -> Result<()> {
         Config::load(&config_path)?
     } else {
         eprintln!("No configuration file found at: {}", config_path.display());
-        eprintln!("Run 'iptv cli add-provider' to create one.");
+        eprintln!("Please create a config file with provider details.");
         Config::default()
     };
 
@@ -682,7 +433,7 @@ async fn main() -> Result<()> {
         Some(Commands::Tui) | None => {
             // Launch TUI
             if config.providers.is_empty() {
-                eprintln!("No providers configured. Run 'iptv cli add-provider' to add one.");
+                eprintln!("No providers configured. Please add provider details to config.toml.");
                 return Ok(());
             }
             iptv::run_tui(config, player).await?;
@@ -698,20 +449,6 @@ async fn main() -> Result<()> {
             let context = CommandContext::new(config.providers.clone(), selected_provider, false);
 
             match cli_args.command {
-                CliSubcommands::Play {
-                    id,
-                    r#type,
-                    detached,
-                } => {
-                    let content_type = r#type.map(|t| ContentType::from_str(&t)).transpose()?;
-                    let cmd = PlayCommand {
-                        id,
-                        content_type,
-                        detached,
-                    };
-                    cmd.execute(context, player).await?;
-                }
-
                 CliSubcommands::Search {
                     query,
                     r#type,
@@ -727,111 +464,12 @@ async fn main() -> Result<()> {
                     cmd.execute(context).await?;
                 }
 
-                CliSubcommands::List(list_cmd) => {
-                    let (content_type, category, format, limit) = match list_cmd {
-                        ListSubCommand::Live {
-                            category,
-                            format,
-                            limit,
-                        } => (ContentType::Live, category, format, limit),
-                        ListSubCommand::Movie {
-                            category,
-                            format,
-                            limit,
-                        }
-                        | ListSubCommand::Movies {
-                            category,
-                            format,
-                            limit,
-                        }
-                        | ListSubCommand::Vod {
-                            category,
-                            format,
-                            limit,
-                        } => (ContentType::Movie, category, format, limit),
-                        ListSubCommand::Series {
-                            category,
-                            format,
-                            limit,
-                        }
-                        | ListSubCommand::Tv {
-                            category,
-                            format,
-                            limit,
-                        } => (ContentType::Series, category, format, limit),
-                    };
-
-                    let output_format = OutputFormat::from_str(&format)?;
-                    let cmd = ListCommand {
-                        content_type,
-                        category,
-                        format: output_format,
-                        limit,
-                    };
-                    cmd.execute(context).await?;
-                }
-
-                CliSubcommands::Info { id, r#type, format } => {
-                    let content_type = ContentType::from_str(&r#type)?;
-                    let output_format = OutputFormat::from_str(&format)?;
-                    let cmd = InfoCommand {
-                        id,
-                        content_type,
-                        format: output_format,
-                    };
-                    cmd.execute(context).await?;
-                }
-
-                CliSubcommands::Url { id, r#type } => {
-                    let (api, _) = context.get_single_provider().await?;
-                    let url = api.get_stream_url(id, &r#type, None);
-                    println!("{}", url);
-                }
-
-                CliSubcommands::Fav(fav_cmd) => {
-                    let cmd = match fav_cmd {
-                        FavCommand::List { format } => {
-                            let output_format = OutputFormat::from_str(&format)?;
-                            FavoritesCommand::List {
-                                format: output_format,
-                            }
-                        }
-                        FavCommand::Add { id, r#type, name } => {
-                            let content_type = ContentType::from_str(&r#type)?;
-                            FavoritesCommand::Add {
-                                id,
-                                content_type,
-                                name,
-                            }
-                        }
-                        FavCommand::Remove { id } => FavoritesCommand::Remove { id },
-                    };
-                    cmd.execute(context).await?;
-                }
-
                 CliSubcommands::Cache(cache_cmd) => {
                     let cmd = match cache_cmd {
                         CacheSubCommand::Refresh => CacheCommand::Refresh,
                         CacheSubCommand::Clear => CacheCommand::Clear,
                     };
                     cmd.execute(context).await?;
-                }
-
-                CliSubcommands::Providers(providers_cmd) => {
-                    let cmd = match providers_cmd {
-                        ProvidersSubCommand::List { format } => {
-                            let output_format = OutputFormat::from_str(&format)?;
-                            ProvidersCommand::List {
-                                format: output_format,
-                            }
-                        }
-                        ProvidersSubCommand::Test { name } => ProvidersCommand::Test { name },
-                    };
-                    cmd.execute(context).await?;
-                }
-
-                CliSubcommands::AddProvider => {
-                    add_provider_interactively(config_path).await?;
                 }
             }
         }

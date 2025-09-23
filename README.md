@@ -130,21 +130,7 @@ export IPTV_PROVIDER="My IPTV Service"
 export RUST_LOG=debug
 ```
 
-### Interactive Provider Setup
 
-You can add providers interactively:
-```bash
-# Add a new provider
-./iptv cli add-provider
-
-# List configured providers
-./iptv cli providers list
-
-# Test provider connection
-./iptv cli providers test <provider_name>
-```
-
-This will prompt you for provider details and automatically update your configuration.
 
 ## Usage
 
@@ -189,25 +175,10 @@ Scriptable command-line interface for automation:
 ./iptv cli search "movie name" --type movie
 ./iptv cli search "news" --type live
 
-# List content
-./iptv cli list live              # List all live streams
-./iptv cli list movie             # List all movies
-./iptv cli list series            # List all TV series
 
-# Play content by ID
-./iptv cli play 12345 --type live
-./iptv cli play 67890 --type movie --detached  # Play in detached window
-
-# Manage favorites
-./iptv cli fav list
-./iptv cli fav add 12345 --type live "Channel Name"
-./iptv cli fav remove 12345
-
-# Get stream URL (for external players)
-./iptv cli url 12345 --type live
 
 # Output in different formats
-./iptv cli list live --format json
+./iptv cli search "sports" --format json
 ./iptv cli search "sports" --format m3u
 ```
 

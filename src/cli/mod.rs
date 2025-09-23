@@ -6,19 +6,9 @@ use iptv::config::ProviderConfig;
 use iptv::xtream::XTreamAPI;
 
 pub mod cache;
-pub mod favorites;
-pub mod info;
-pub mod list;
-pub mod play;
-pub mod providers;
 pub mod search;
 
 pub use cache::CacheCommand;
-pub use favorites::FavoritesCommand;
-pub use info::InfoCommand;
-pub use list::ListCommand;
-pub use play::PlayCommand;
-pub use providers::ProvidersCommand;
 pub use search::SearchCommand;
 
 /// Output format for command results
@@ -63,7 +53,7 @@ impl CommandContext {
     /// Get a single provider for commands that require exactly one
     pub async fn get_single_provider(&self) -> Result<(XTreamAPI, String)> {
         if self.providers.is_empty() {
-            anyhow::bail!("No providers configured. Run 'iptv add-provider' to add one.");
+            anyhow::bail!("No providers configured. Please add provider details to config.toml.");
         }
 
         let provider = if let Some(name) = &self.selected_provider {
@@ -196,14 +186,6 @@ impl ContentType {
             "movie" | "movies" | "vod" => Ok(Self::Movie),
             "series" | "tv" => Ok(Self::Series),
             _ => anyhow::bail!("Invalid type: {}. Use 'live', 'movie', or 'series'", s),
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Live => "live",
-            Self::Movie => "movie",
-            Self::Series => "series",
         }
     }
 }
