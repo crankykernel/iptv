@@ -147,6 +147,8 @@ pub struct App {
     previous_state_before_menu: Option<Box<AppState>>,
     previous_items_before_menu: Vec<String>,
     previous_nav_before_menu: NavigationState,
+    // Navigation stack for proper back navigation
+    navigation_stack: Vec<(AppState, Vec<String>, NavigationState)>,
     pub playback_status: Option<MpvPlaybackStatus>,
     last_status_update: Instant,
     pub current_stream_name: Option<String>,
@@ -159,9 +161,36 @@ impl App {
         self.visible_height = height.saturating_sub(4).max(1);
     }
 
+    fn push_navigation_state(&mut self) {
+        // Save current state to navigation stack before transitioning
+        let current_nav = NavigationState {
+            selected_index: self.selected_index,
+            scroll_offset: self.scroll_offset,
+            search_query: self.search_query.clone(),
+            filtered_indices: self.filtered_indices.clone(),
+        };
+        self.navigation_stack
+            .push((self.state.clone(), self.items.clone(), current_nav));
+    }
+
+    fn pop_navigation_state(&mut self) -> bool {
+        // Restore previous state from navigation stack
+        if let Some((prev_state, prev_items, prev_nav)) = self.navigation_stack.pop() {
+            self.state = prev_state;
+            self.items = prev_items;
+            self.selected_index = prev_nav.selected_index;
+            self.scroll_offset = prev_nav.scroll_offset;
+            self.search_query = prev_nav.search_query;
+            self.filtered_indices = prev_nav.filtered_indices;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn new(config: crate::config::Config, player: Player) -> Self {
         let providers = config.providers.clone();
-        let items = if providers.len() > 1 {
+        let items = if !providers.is_empty() {
             let mut items = vec!["Favourites".to_string()];
             items.extend(
                 providers
@@ -176,12 +205,10 @@ impl App {
             vec![]
         };
 
-        let state = if providers.len() > 1 {
-            AppState::ProviderSelection
-        } else if providers.len() == 1 {
-            AppState::Loading("Connecting to provider...".to_string())
-        } else {
+        let state = if providers.is_empty() {
             AppState::Error("No providers configured".to_string())
+        } else {
+            AppState::ProviderSelection
         };
 
         let filtered_indices = (0..items.len()).collect();
@@ -226,6 +253,7 @@ impl App {
             previous_state_before_menu: None,
             previous_items_before_menu: Vec::new(),
             previous_nav_before_menu: NavigationState::new(),
+            navigation_stack: Vec::new(),
             playback_status: None,
             last_status_update: Instant::now(),
             current_stream_name: None,
@@ -278,14 +306,7 @@ impl App {
             self.last_status_update = Instant::now();
         }
 
-        // Auto-connect to single provider on startup
-        if matches!(self.state, AppState::Loading(_))
-            && self.config.providers.len() == 1
-            && self.current_api.is_none()
-        {
-            let provider = self.config.providers[0].clone();
-            self.connect_to_provider(&provider).await;
-        }
+        // Removed auto-connect for single provider - now shows provider selection screen
 
         // Check player status periodically to detect exits
         if matches!(self.state, AppState::Playing(_)) {
@@ -493,6 +514,7 @@ impl App {
                     if self.selected_index == 0 {
                         // Favourites selected
                         self.save_current_navigation_state();
+                        self.push_navigation_state(); // Save to stack before transitioning
                         self.load_all_favourites().await;
                     } else if self.selected_index > 0
                         && self.selected_index <= self.config.providers.len()
@@ -500,6 +522,7 @@ impl App {
                         // Provider selected
                         let provider = self.config.providers[self.selected_index - 1].clone();
                         self.save_current_navigation_state();
+                        self.push_navigation_state(); // Save to stack before connecting
                         self.connect_to_provider(&provider).await;
                     } else if self.selected_index == self.items.len() - 1 {
                         // Configuration selected (last item)
@@ -523,13 +546,17 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('b') => {
-                    if self.config.providers.len() > 1 {
-                        self.save_current_navigation_state();
-                        self.state = AppState::ProviderSelection;
-                        self.restore_navigation_state(&AppState::ProviderSelection);
-                        self.update_provider_items();
-                    } else {
-                        return Some(Action::Quit);
+                    // Use navigation stack to go back
+                    if !self.pop_navigation_state() {
+                        // If stack is empty, go to provider selection or quit
+                        if !self.config.providers.is_empty() {
+                            self.save_current_navigation_state();
+                            self.state = AppState::ProviderSelection;
+                            self.restore_navigation_state(&AppState::ProviderSelection);
+                            self.update_provider_items();
+                        } else {
+                            return Some(Action::Quit);
+                        }
                     }
                 }
                 _ => {}
@@ -738,6 +765,7 @@ impl App {
                     if self.selected_index < self.categories.len() {
                         let category = self.categories[self.selected_index].clone();
                         self.save_current_navigation_state();
+                        self.push_navigation_state(); // Save to stack before loading streams
                         self.load_streams(content_type, category).await;
                     }
                 }
@@ -746,10 +774,14 @@ impl App {
                     if !self.search_query.is_empty() {
                         self.reset_filter();
                     } else {
+                        // Use navigation stack to go back
                         self.save_current_navigation_state();
-                        self.state = AppState::MainMenu;
-                        self.restore_navigation_state(&AppState::MainMenu);
-                        self.update_main_menu_items();
+                        if !self.pop_navigation_state() {
+                            // Fallback to main menu if stack is empty
+                            self.state = AppState::MainMenu;
+                            self.restore_navigation_state(&AppState::MainMenu);
+                            self.update_main_menu_items();
+                        }
                     }
                 }
                 _ => {}
@@ -984,12 +1016,17 @@ impl App {
                     if !self.search_query.is_empty() {
                         self.reset_filter();
                     } else {
-                        // Go back to category selection
+                        // Use navigation stack to go back
                         self.save_current_navigation_state();
-                        self.state = AppState::CategorySelection(content_type);
-                        self.restore_navigation_state(&AppState::CategorySelection(content_type));
-                        // Reload categories to ensure UI is in sync
-                        self.load_categories(content_type).await;
+                        if !self.pop_navigation_state() {
+                            // Fallback to category selection if stack is empty
+                            self.state = AppState::CategorySelection(content_type);
+                            self.restore_navigation_state(&AppState::CategorySelection(
+                                content_type,
+                            ));
+                            // Reload categories to ensure UI is in sync
+                            self.load_categories(content_type).await;
+                        }
                     }
                 }
                 _ => {}
@@ -1618,13 +1655,10 @@ impl App {
                     if !self.search_query.is_empty() {
                         self.reset_filter();
                     } else {
-                        self.save_current_navigation_state();
-                        // Go back to MainMenu for single provider, ProviderSelection for multiple
-                        if self.config.providers.len() == 1 {
-                            self.state = AppState::MainMenu;
-                            self.restore_navigation_state(&AppState::MainMenu);
-                            self.update_main_menu_items();
-                        } else {
+                        // Use navigation stack to go back
+                        if !self.pop_navigation_state() {
+                            // If stack is empty, fallback to provider selection
+                            self.save_current_navigation_state();
                             self.state = AppState::ProviderSelection;
                             self.restore_navigation_state(&AppState::ProviderSelection);
                             self.update_provider_items();
@@ -1843,8 +1877,8 @@ impl App {
                 self.season_selection_state = NavigationState::new();
 
                 self.state = AppState::MainMenu;
-                self.restore_navigation_state(&AppState::MainMenu);
                 self.update_main_menu_items();
+                self.restore_navigation_state(&AppState::MainMenu);
                 self.add_log("Successfully connected to provider".to_string());
             }
             Err(e) => {
@@ -1902,18 +1936,22 @@ impl App {
 
         match selection.as_str() {
             "Favourites" => {
+                self.push_navigation_state(); // Save current state to stack
                 self.load_all_favourites().await;
                 None
             }
             "Live TV" => {
+                self.push_navigation_state(); // Save current state to stack
                 self.load_categories(ContentType::Live).await;
                 None
             }
             "Movies (VOD)" => {
+                self.push_navigation_state(); // Save current state to stack
                 self.load_categories(ContentType::Movies).await;
                 None
             }
             "TV Series" => {
+                self.push_navigation_state(); // Save current state to stack
                 self.load_categories(ContentType::Series).await;
                 None
             }

@@ -417,13 +417,32 @@ async fn main() -> Result<()> {
         .map(|p| p.join("iptv").join("config.toml"))
         .unwrap_or_else(|| PathBuf::from("config.toml"));
 
-    let config = if config_path.exists() {
+    let mut config = if config_path.exists() {
         Config::load(&config_path)?
     } else {
-        eprintln!("No configuration file found at: {}", config_path.display());
-        eprintln!("Please create a config file with provider details.");
         Config::default()
     };
+
+    // Check if we should run the interactive setup
+    if iptv::setup::should_run_setup(&config_path, &config) {
+        // Only run setup for TUI mode or no command (which defaults to TUI)
+        match cli.command {
+            Some(Commands::Tui) | None => {
+                iptv::setup::interactive_provider_setup().await?;
+                // Reload the config after setup
+                config = Config::load(&config_path)?;
+            }
+            _ => {
+                // For other commands, just warn about missing providers
+                if config.providers.is_empty() {
+                    eprintln!(
+                        "No providers configured. Please run 'iptv --tui' to set up a provider."
+                    );
+                    return Ok(());
+                }
+            }
+        }
+    }
 
     // Create player
     let player = Player::new();
@@ -432,10 +451,6 @@ async fn main() -> Result<()> {
     match cli.command {
         Some(Commands::Tui) | None => {
             // Launch TUI
-            if config.providers.is_empty() {
-                eprintln!("No providers configured. Please add provider details to config.toml.");
-                return Ok(());
-            }
             iptv::run_tui(config, player).await?;
         }
 
