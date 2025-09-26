@@ -39,6 +39,10 @@ struct Cli {
     #[arg(long, global = true)]
     debug_log: bool,
 
+    /// Provider name to open directly (case-insensitive, for TUI mode)
+    #[arg(short, long, global = true)]
+    provider: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -46,9 +50,13 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Launch interactive TUI (default if no command given)
-    Tui,
+    Tui {
+        /// Provider name to open directly (case-insensitive)
+        #[arg(short, long)]
+        provider: Option<String>,
+    },
 
-    /// Launch rofi menu with favourites  
+    /// Launch rofi menu with favourites
     Rofi,
 
     /// Command-line interface for scriptable operations
@@ -426,8 +434,8 @@ async fn main() -> Result<()> {
     // Check if we should run the interactive setup
     if iptv::setup::should_run_setup(&config_path, &config) {
         // Only run setup for TUI mode or no command (which defaults to TUI)
-        match cli.command {
-            Some(Commands::Tui) | None => {
+        match &cli.command {
+            Some(Commands::Tui { .. }) | None => {
                 iptv::setup::interactive_provider_setup().await?;
                 // Reload the config after setup
                 config = Config::load(&config_path)?;
@@ -449,9 +457,14 @@ async fn main() -> Result<()> {
 
     // Execute command
     match cli.command {
-        Some(Commands::Tui) | None => {
-            // Launch TUI
-            iptv::run_tui(config, player).await?;
+        Some(Commands::Tui { provider }) => {
+            // Launch TUI with provider from subcommand or global option
+            let provider_to_use = provider.or(cli.provider.clone());
+            iptv::run_tui(config, player, provider_to_use).await?;
+        }
+        None => {
+            // No command given, launch TUI with global provider option if specified
+            iptv::run_tui(config, player, cli.provider.clone()).await?;
         }
 
         Some(Commands::Cli(cli_args)) => {

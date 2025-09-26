@@ -19,6 +19,6 @@ pub use xtream::XTreamAPI;
 use anyhow::Result;
 
 /// Run the TUI application
-pub async fn run_tui(config: Config, player: Player) -> Result<()> {
-    tui::run_tui(config, player).await
+pub async fn run_tui(config: Config, player: Player, provider: Option<String>) -> Result<()> {
+    tui::run_tui(config, player, provider).await
 }

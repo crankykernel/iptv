@@ -191,7 +191,11 @@ impl App {
         }
     }
 
-    pub fn new(config: crate::config::Config, player: Player) -> Self {
+    pub async fn new(
+        config: crate::config::Config,
+        player: Player,
+        provider_name: Option<String>,
+    ) -> Self {
         let providers = config.providers.clone();
         let items = if !providers.is_empty() {
             let mut items = vec!["Favourites".to_string()];
@@ -216,7 +220,7 @@ impl App {
 
         let filtered_indices = (0..items.len()).collect();
 
-        Self {
+        let mut app = Self {
             state,
             config,
             current_api: None,
@@ -262,7 +266,36 @@ impl App {
             playback_status: None,
             last_status_update: Instant::now(),
             current_stream_name: None,
+        };
+
+        // If a provider was specified, try to connect to it directly
+        if let Some(provider_name) = provider_name {
+            // Find the provider by name (case-insensitive)
+            let provider_found = app
+                .config
+                .providers
+                .iter()
+                .find(|p| {
+                    p.name
+                        .as_ref()
+                        .map(|n| n.to_lowercase() == provider_name.to_lowercase())
+                        .unwrap_or(false)
+                })
+                .cloned();
+
+            if let Some(provider) = provider_found {
+                // Connect to the provider
+                app.connect_to_provider(&provider).await;
+            } else {
+                // Provider not found, show error and fall back to provider selection
+                app.state = AppState::Error(format!("Provider '{}' not found", provider_name));
+                // After a brief display, fall back to provider selection
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                app.state = AppState::ProviderSelection;
+            }
         }
+
+        app
     }
 
     pub fn tick(&mut self) {

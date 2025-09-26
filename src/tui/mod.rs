@@ -57,11 +57,15 @@ impl Tui {
     }
 }
 
-pub async fn run_tui(config: crate::config::Config, player: Player) -> Result<()> {
+pub async fn run_tui(
+    config: crate::config::Config,
+    player: Player,
+    provider: Option<String>,
+) -> Result<()> {
     let mut tui = Tui::new()?;
     tui.init()?;
 
-    let mut app = App::new(config, player.clone());
+    let mut app = App::new(config, player.clone(), provider).await;
     let res = run_app(&mut tui, &mut app).await;
 
     // Clean up player resources before exiting
