@@ -88,6 +88,7 @@ pub enum AppState {
     SeasonSelection(Stream),
     EpisodeSelection(Stream, TuiSeason),
     CrossProviderFavourites,
+    PerProviderFavourites,
     StreamAdvancedMenu(Stream, ContentType),
     Configuration,
     Loading(String),
@@ -131,6 +132,7 @@ pub struct App {
     seasons: Vec<TuiSeason>,
     episodes: Vec<ApiEpisode>,
     cross_provider_favourites: Vec<(FavouriteStream, ProviderConfig)>,
+    per_provider_favourites: Vec<FavouriteStream>,
     vod_info: Option<VodInfoResponse>,
     // Cache for categories by content type
     cached_categories: HashMap<ContentType, Vec<Category>>,
@@ -143,6 +145,7 @@ pub struct App {
     stream_selection_states: HashMap<(ContentType, String), NavigationState>,
     season_selection_state: NavigationState,
     cross_provider_favourites_state: NavigationState,
+    per_provider_favourites_state: NavigationState,
     ignore_config: IgnoreConfig,
     previous_state_before_menu: Option<Box<AppState>>,
     previous_items_before_menu: Vec<String>,
@@ -240,6 +243,7 @@ impl App {
             seasons: Vec::new(),
             episodes: Vec::new(),
             cross_provider_favourites: Vec::new(),
+            per_provider_favourites: Vec::new(),
             vod_info: None,
             cached_categories: HashMap::new(),
             cached_streams: HashMap::new(),
@@ -249,6 +253,7 @@ impl App {
             stream_selection_states: HashMap::new(),
             season_selection_state: NavigationState::new(),
             cross_provider_favourites_state: NavigationState::new(),
+            per_provider_favourites_state: NavigationState::new(),
             ignore_config: IgnoreConfig::load().unwrap_or_default(),
             previous_state_before_menu: None,
             previous_items_before_menu: Vec::new(),
@@ -1671,6 +1676,233 @@ impl App {
                 }
                 _ => {}
             },
+            AppState::PerProviderFavourites => match key.code {
+                KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Move favourite up
+                    if self.selected_index < self.per_provider_favourites.len() {
+                        let favourite = &self.per_provider_favourites[self.selected_index];
+                        let moving_stream_id = favourite.stream_id;
+                        let moving_stream_type = favourite.stream_type.clone();
+
+                        if let Some(api) = &self.current_api {
+                            let favourites_manager = match crate::FavouritesManager::new() {
+                                Ok(fm) => fm,
+                                Err(e) => {
+                                    self.add_log(format!("Failed to access favourites: {}", e));
+                                    return None;
+                                }
+                            };
+
+                            if let Ok(true) = favourites_manager.move_favourite_up(
+                                &api.provider_hash,
+                                favourite.stream_id,
+                                &favourite.stream_type,
+                            ) {
+                                self.add_log(format!("Moved {} up", favourite.name));
+                                // Reload favourites
+                                self.load_provider_favourites().await;
+
+                                // Find the moved item's new position and select it
+                                if let Some(new_index) =
+                                    self.per_provider_favourites.iter().position(|f| {
+                                        f.stream_id == moving_stream_id
+                                            && f.stream_type == moving_stream_type
+                                    })
+                                {
+                                    self.selected_index = new_index;
+                                    self.ensure_selected_visible();
+                                }
+                            }
+                        }
+                    }
+                }
+                KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Move favourite down
+                    if self.selected_index < self.per_provider_favourites.len() {
+                        let favourite = &self.per_provider_favourites[self.selected_index];
+                        let moving_stream_id = favourite.stream_id;
+                        let moving_stream_type = favourite.stream_type.clone();
+
+                        if let Some(api) = &self.current_api {
+                            let favourites_manager = match crate::FavouritesManager::new() {
+                                Ok(fm) => fm,
+                                Err(e) => {
+                                    self.add_log(format!("Failed to access favourites: {}", e));
+                                    return None;
+                                }
+                            };
+
+                            if let Ok(true) = favourites_manager.move_favourite_down(
+                                &api.provider_hash,
+                                favourite.stream_id,
+                                &favourite.stream_type,
+                            ) {
+                                self.add_log(format!("Moved {} down", favourite.name));
+                                // Reload favourites
+                                self.load_provider_favourites().await;
+
+                                // Find the moved item's new position and select it
+                                if let Some(new_index) =
+                                    self.per_provider_favourites.iter().position(|f| {
+                                        f.stream_id == moving_stream_id
+                                            && f.stream_type == moving_stream_type
+                                    })
+                                {
+                                    self.selected_index = new_index;
+                                    self.ensure_selected_visible();
+                                }
+                            }
+                        }
+                    }
+                }
+                KeyCode::Up | KeyCode::Char('k') => self.move_selection_up(),
+                KeyCode::Down | KeyCode::Char('j') => self.move_selection_down(),
+                KeyCode::PageUp => self.move_selection_page_up(),
+                KeyCode::PageDown => self.move_selection_page_down(),
+                KeyCode::Home | KeyCode::Char('H') => self.move_selection_home(),
+                KeyCode::End | KeyCode::Char('G') => self.move_selection_end(),
+                KeyCode::Enter => {
+                    if self.selected_index < self.per_provider_favourites.len() {
+                        let favourite = self.per_provider_favourites[self.selected_index].clone();
+
+                        if let Some(api) = &self.current_api {
+                            // Store current stream name
+                            self.current_stream_name = Some(favourite.name.clone());
+
+                            // Force immediate status update
+                            self.last_status_update =
+                                Instant::now() - std::time::Duration::from_secs(1);
+
+                            // Use .ts extension if configured for live streams
+                            let extension = if favourite.stream_type == "live"
+                                && self.config.settings.use_ts_for_live
+                            {
+                                Some("ts")
+                            } else {
+                                None
+                            };
+
+                            let stream_url = api.get_stream_url(
+                                favourite.stream_id,
+                                &favourite.stream_type,
+                                extension,
+                            );
+
+                            self.add_log(format!("Playing: {}", favourite.name));
+                            self.add_log(format!("Stream URL: {}", stream_url));
+
+                            // Use play mode from configuration
+                            let result = match self.config.settings.play_mode {
+                                PlayMode::Mpv => self.player.play_tui(&stream_url).await,
+                                PlayMode::MpvInTerminal => {
+                                    self.player.play_in_terminal(&stream_url).await
+                                }
+                            };
+
+                            if let Err(e) = result {
+                                self.state =
+                                    AppState::Error(format!("Failed to play favourite: {}", e));
+                                self.add_log(format!("Playback failed: {}", e));
+                            } else {
+                                match self.config.settings.play_mode {
+                                    PlayMode::Mpv => {
+                                        self.add_log(
+                                            "Player started in background window".to_string(),
+                                        );
+                                        self.add_log(
+                                            "Continue browsing while video plays".to_string(),
+                                        );
+                                    }
+                                    PlayMode::MpvInTerminal => {
+                                        self.add_log("Player started in terminal mode".to_string());
+                                    }
+                                }
+                                // Stay in PerProviderFavourites state
+                            }
+                        }
+                    }
+                }
+                KeyCode::Char('a') => {
+                    // Show advanced menu for live streams
+                    if self.selected_index < self.per_provider_favourites.len() {
+                        let favourite = self.per_provider_favourites[self.selected_index].clone();
+
+                        // Only show advanced menu for live streams
+                        if favourite.stream_type == "live" {
+                            // Convert favourite to Stream
+                            let stream = Stream {
+                                num: 0,
+                                name: favourite.name.clone(),
+                                stream_type: favourite.stream_type.clone(),
+                                stream_id: favourite.stream_id,
+                                stream_icon: None,
+                                epg_channel_id: None,
+                                added: None,
+                                category_id: favourite.category_id,
+                                category_ids: None,
+                                custom_sid: None,
+                                tv_archive: None,
+                                direct_source: None,
+                                tv_archive_duration: None,
+                                is_adult: None,
+                                rating: None,
+                                rating_5based: None,
+                                container_extension: Some("m3u8".to_string()),
+                            };
+
+                            self.show_stream_advanced_menu(stream, ContentType::Live)
+                                .await;
+                        }
+                    }
+                }
+                KeyCode::Char('d') => {
+                    // Remove favourite
+                    if self.selected_index < self.per_provider_favourites.len() {
+                        let favourite = &self.per_provider_favourites[self.selected_index];
+
+                        if let Some(api) = &self.current_api {
+                            let favourites_manager = match crate::FavouritesManager::new() {
+                                Ok(fm) => fm,
+                                Err(e) => {
+                                    self.add_log(format!("Failed to access favourites: {}", e));
+                                    return None;
+                                }
+                            };
+
+                            let _ = favourites_manager.remove_favourite(
+                                &api.provider_hash,
+                                favourite.stream_id,
+                                &favourite.stream_type,
+                            );
+
+                            self.add_log(format!("Removed {} from favourites", favourite.name));
+
+                            // Reload the per-provider favourites
+                            self.load_provider_favourites().await;
+                        }
+                    }
+                }
+                KeyCode::Esc | KeyCode::Char('b') => {
+                    // If there's an active filter, clear it instead of going back
+                    if !self.search_query.is_empty() {
+                        self.reset_filter();
+                    } else {
+                        // Use navigation stack to go back
+                        if !self.pop_navigation_state() {
+                            // If stack is empty, fallback to main menu
+                            self.save_current_navigation_state();
+                            self.state = AppState::MainMenu;
+                            self.restore_navigation_state(&AppState::MainMenu);
+                            self.update_main_menu_items();
+                        }
+                    }
+                }
+                KeyCode::Char('/') => {
+                    self.search_active = true;
+                    self.search_query.clear();
+                }
+                _ => {}
+            },
             AppState::Playing(_name) => match key.code {
                 KeyCode::Esc | KeyCode::Char('s') => {
                     self.stop_playing();
@@ -1904,18 +2136,12 @@ impl App {
     }
 
     fn update_main_menu_items(&mut self) {
-        let mut menu_items = vec![];
-
-        // Only show Favourites in main menu when there's a single provider
-        if self.config.providers.len() == 1 {
-            menu_items.push("Favourites".to_string());
-        }
-
-        menu_items.extend(vec![
+        let mut menu_items = vec![
+            "Favourites".to_string(),
             "Live TV".to_string(),
             "Movies (VOD)".to_string(),
             "TV Series".to_string(),
-        ]);
+        ];
 
         // Add separator and Configuration option
         menu_items.push("".to_string()); // Empty string acts as separator
@@ -1937,7 +2163,7 @@ impl App {
         match selection.as_str() {
             "Favourites" => {
                 self.push_navigation_state(); // Save current state to stack
-                self.load_all_favourites().await;
+                self.load_provider_favourites().await;
                 None
             }
             "Live TV" => {
@@ -2481,10 +2707,15 @@ impl App {
         }
     }
 
-    async fn load_all_favourites(&mut self) {
-        self.state = AppState::Loading("Loading all favourites...".to_string());
-        self.add_log("Loading favourites from all providers".to_string());
-        self.current_provider_name = Some("Favourites".to_string());
+    async fn load_favourites_internal(&mut self, provider_filter: Option<String>) {
+        let is_per_provider = provider_filter.is_some();
+
+        if is_per_provider {
+            self.state = AppState::Loading("Loading provider favourites...".to_string());
+        } else {
+            self.state = AppState::Loading("Loading all favourites...".to_string());
+            self.current_provider_name = Some("Favourites".to_string());
+        }
 
         let favourites_manager = match crate::FavouritesManager::new() {
             Ok(fm) => fm,
@@ -2496,58 +2727,112 @@ impl App {
 
         let mut all_favourites = Vec::new();
         let mut all_items = Vec::new();
+        let mut per_provider_favourites = Vec::new();
 
-        // Collect favourites from all providers
-        let providers = self.config.providers.clone();
-        for provider in &providers {
-            let api = match crate::XTreamAPI::new_with_id(
-                provider.url.clone(),
-                provider.username.clone(),
-                provider.password.clone(),
-                provider.name.clone(),
-                provider.id.clone(),
-            ) {
-                Ok(mut api) => {
-                    api.disable_progress();
-                    api
-                }
-                Err(e) => {
-                    self.add_log(format!("Failed to connect to provider: {}", e));
-                    continue;
-                }
-            };
+        if let Some(provider_hash) = provider_filter {
+            // Load favourites for single provider
+            let provider_name = self
+                .current_provider_name
+                .clone()
+                .unwrap_or_else(|| "provider".to_string());
+            self.add_log(format!("Loading favourites for {}", provider_name));
 
-            match favourites_manager.get_favourites(&api.provider_hash) {
+            match favourites_manager.get_favourites(&provider_hash) {
                 Ok(favs) => {
                     for fav in favs {
-                        let provider_name = provider.name.as_ref().unwrap_or(&provider.url);
-                        all_items.push(format!(
-                            "[{}] {} [{}]",
-                            fav.stream_type, fav.name, provider_name
-                        ));
-                        all_favourites.push((fav, provider.clone()));
+                        // Format consistently with cross-provider view
+                        let display_name = format!("[{}] {}", fav.stream_type, fav.name);
+                        all_items.push(display_name);
+                        per_provider_favourites.push(fav);
                     }
                 }
                 Err(e) => {
                     self.add_log(format!("Failed to load favourites: {}", e));
                 }
             }
+
+            if per_provider_favourites.is_empty() {
+                self.state = AppState::Error("No favourites found for this provider".to_string());
+                return;
+            }
+
+            self.per_provider_favourites = per_provider_favourites;
+        } else {
+            // Load favourites from all providers
+            self.add_log("Loading favourites from all providers".to_string());
+
+            let providers = self.config.providers.clone();
+            for provider in &providers {
+                let api = match crate::XTreamAPI::new_with_id(
+                    provider.url.clone(),
+                    provider.username.clone(),
+                    provider.password.clone(),
+                    provider.name.clone(),
+                    provider.id.clone(),
+                ) {
+                    Ok(mut api) => {
+                        api.disable_progress();
+                        api
+                    }
+                    Err(e) => {
+                        self.add_log(format!("Failed to connect to provider: {}", e));
+                        continue;
+                    }
+                };
+
+                match favourites_manager.get_favourites(&api.provider_hash) {
+                    Ok(favs) => {
+                        for fav in favs {
+                            let provider_name = provider.name.as_ref().unwrap_or(&provider.url);
+                            all_items.push(format!(
+                                "[{}] {} [{}]",
+                                fav.stream_type, fav.name, provider_name
+                            ));
+                            all_favourites.push((fav, provider.clone()));
+                        }
+                    }
+                    Err(e) => {
+                        self.add_log(format!("Failed to load favourites: {}", e));
+                    }
+                }
+            }
+
+            if all_favourites.is_empty() {
+                self.state = AppState::Error("No favourites found across any provider".to_string());
+                return;
+            }
+
+            self.cross_provider_favourites = all_favourites;
         }
 
-        if all_favourites.is_empty() {
-            self.state = AppState::Error("No favourites found across any provider".to_string());
-            return;
-        }
-
-        // Store the cross-provider favourites
-        self.cross_provider_favourites = all_favourites;
         self.items = all_items;
         self.reset_filter();
 
-        self.state = AppState::CrossProviderFavourites;
-        self.restore_navigation_state(&AppState::CrossProviderFavourites);
+        if is_per_provider {
+            self.state = AppState::PerProviderFavourites;
+            self.restore_navigation_state(&AppState::PerProviderFavourites);
+            self.add_log(format!("Loaded {} provider favourites", self.items.len()));
+        } else {
+            self.state = AppState::CrossProviderFavourites;
+            self.restore_navigation_state(&AppState::CrossProviderFavourites);
+            self.add_log(format!("Loaded {} favourites", self.items.len()));
+        }
+    }
 
-        self.add_log(format!("Loaded {} favourites", self.items.len()));
+    async fn load_all_favourites(&mut self) {
+        self.load_favourites_internal(None).await;
+    }
+
+    async fn load_provider_favourites(&mut self) {
+        let api_hash = match &self.current_api {
+            Some(api) => api.provider_hash.clone(),
+            None => {
+                self.state = AppState::Error("No provider connected".to_string());
+                return;
+            }
+        };
+
+        self.load_favourites_internal(Some(api_hash)).await;
     }
 
     async fn toggle_favourite_stream(&mut self, stream: &Stream) {
@@ -3335,6 +3620,9 @@ impl App {
             AppState::CrossProviderFavourites => {
                 self.cross_provider_favourites_state = nav_state;
             }
+            AppState::PerProviderFavourites => {
+                self.per_provider_favourites_state = nav_state;
+            }
             AppState::Configuration => {
                 self.config_state = nav_state;
             }
@@ -3358,6 +3646,7 @@ impl App {
                 .unwrap_or_else(NavigationState::new),
             AppState::SeasonSelection(_) => self.season_selection_state.clone(),
             AppState::CrossProviderFavourites => self.cross_provider_favourites_state.clone(),
+            AppState::PerProviderFavourites => self.per_provider_favourites_state.clone(),
             AppState::Configuration => self.config_state.clone(),
             _ => NavigationState::new(),
         };
